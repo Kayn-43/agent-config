@@ -1,10 +1,10 @@
 {
-  "note": "Skills that are deliberately NOT installed, even though they exist in this repo. Checked by scripts/install.ps1 on every run, so the choice survives update.ps1. Remove an entry to re-enable it, then re-run install.ps1.",
+  "note": "仓库里存在、但故意不安装的技能。install.ps1 每次运行都会读取此文件，因此该决定能延续到 update.ps1。删掉条目再重跑 install.ps1 即可重新启用。",
   "skills": [
     {
       "name": "ubuntu",
       "disabled_on": "2026-09-15",
-      "reason": "Overlaps the pre-existing machine-oriented skills ubuntu20-experiment and ubuntu24-experiment, which are still in use. This capability-oriented 'ubuntu' skill supersedes them only once those are retired. Re-enable after removing the old ones.",
+      "reason": "与仍在使用的、面向具体机器的 ubuntu20-experiment 和 ubuntu24-experiment 功能重叠。这个面向能力的 ubuntu 技能要等那两个退役之后才接管。等删除旧技能后再启用。",
       "owner": "kayn"
     }
   ]

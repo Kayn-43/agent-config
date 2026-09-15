@@ -1,28 +1,30 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Link this repository's skills, agents and rules into the agent client homes.
+    把本仓库的技能、agents 和规则链接进各 agent 客户端的目录。
 
 .DESCRIPTION
-    Content is LINKED, never copied, so one edit propagates everywhere and nothing
-    drifts. See README.md for why junctions and hard links are used instead of
-    symbolic links.
+    内容只做“链接”，绝不拷贝，因此改一处即到处生效，不会出现副本失同步。
+    关于为何使用 junction 与硬链接而不是符号链接，见 README.md。
 
-    Directories -> directory junctions      (no elevation required)
-    Files       -> hard links, else copy    (no elevation required)
+    目录 -> 目录联接（Junction）      （不需要管理员权限）
+    文件 -> 硬链接，失败时退回复制   （不需要管理员权限）
 
-    Also prunes entries that point into this repository but whose source has been
-    deleted — those linger forever and make the skill list lie about what exists.
-    Entries that do NOT point into this repository are never touched.
+    同时清理指向本仓库、但源已被删除的条目——它们会永远残留，让技能列表谎报
+    实际存在的内容。不指向本仓库的条目绝不触碰。
 
 .PARAMETER DryRun
-    Report what would happen; change nothing.
+    只报告将要发生什么，不改动任何东西。
 
 .PARAMETER WithUpstream
-    Also install/refresh the third-party skills recorded in upstream.json.
+    同时安装/刷新 upstream.json 中记录的第三方技能。
 
 .PARAMETER Proxy
-    HTTP proxy for the upstream installs, e.g. http://127.0.0.1:7897.
+    用于上游安装的 HTTP 代理，例如 http://127.0.0.1:7897。
+
+.PARAMETER Exclude
+    本次运行额外跳过的技能名。持久化的跳过列表在 disabled.json——优先用那个，
+    因为 update.ps1 会重跑本脚本，一次性的参数会被遗忘。
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install.ps1 -DryRun
@@ -66,8 +68,8 @@ $SkillGroups = @('common', 'research', 'remote')
 
 # ---------------------------------------------------------------- disabled skills
 
-# Skills that exist in the repo but must not be linked on this machine.
-# Read from disabled.json on every run so the choice survives update.ps1.
+# 仓库里存在、但本机不得建立链接的技能。
+# 每次运行都从 disabled.json 读取，因此该决定能延续到 update.ps1。
 $script:Disabled = @{}
 $script:DisabledReason = @{}
 
@@ -81,7 +83,7 @@ if (Test-Path -LiteralPath $disabledFile -PathType Leaf) {
         }
     }
     catch {
-        Warn "could not parse disabled.json : $($_.Exception.Message)"
+        Warn "无法解析 disabled.json : $($_.Exception.Message)"
     }
 }
 if ($Exclude) {
@@ -105,13 +107,13 @@ function Off  { param([string] $Text) Write-Host "  [off]   $Text" -ForegroundCo
 function Ensure-Directory {
     param([string] $Path)
     if (Test-Path -LiteralPath $Path) { return }
-    if ($DryRun) { Dry "would create $Path"; return }
+    if ($DryRun) { Dry "将创建 $Path"; return }
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
-    Ok "created $Path"
+    Ok "已创建 $Path"
 }
 
-# A junction (or any link) whose target no longer exists still shows up in the
-# skill list. Only consider entries that point INTO this repository.
+# 目标已不存在的 junction（或任何链接）仍会出现在技能列表里。
+# 因此只处理指向本仓库的条目。
 function Test-PointsIntoRepo {
     param([string] $Target, [string] $RepoPath)
     if (-not $Target) { return $false }
@@ -131,7 +133,7 @@ function Install-SkillGroup {
     $skills = @(Get-ChildItem -LiteralPath $groupDir -Directory | Sort-Object Name)
     if ($skills.Count -eq 0) { return }
 
-    Info "$Group/ : $($skills.Count) skills"
+    Info "$Group/ : $($skills.Count) 个技能"
 
     foreach ($skill in $skills) {
         if ($script:Disabled.ContainsKey($skill.Name)) { continue }
@@ -144,13 +146,13 @@ function Install-SkillGroup {
                     Skip "$link"
                     continue
                 }
-                # A real directory here means something copied it instead of linking.
-                Warn "$link exists as a REAL directory, not a link — it will drift."
-                Warn "       remove it manually, then re-run (install never deletes real directories)."
+                # 这里是真实目录，说明某处把它复制了而不是建立链接。
+                Warn "$link 是真实目录而不是链接——它会失同步。"
+                Warn "       请手动删除后重跑（本脚本绝不删除真实目录）。"
                 continue
             }
 
-            if ($DryRun) { Dry "junction $link -> $($skill.FullName)"; continue }
+            if ($DryRun) { Dry "将建立 junction $link -> $($skill.FullName)"; continue }
 
             $linkParams = @{
                 ItemType = 'Junction'
@@ -162,7 +164,7 @@ function Install-SkillGroup {
                 Ok "junction $($skill.Name) -> $Group/"
             }
             catch {
-                Warn "junction failed for $link : $($_.Exception.Message)"
+                Warn "junction 创建失败：$link : $($_.Exception.Message)"
             }
         }
     }
@@ -178,13 +180,13 @@ function Install-FileLink {
     if (Test-Path -LiteralPath $Destination) {
         $existing = Get-Item -LiteralPath $Destination -Force
         if ($existing.LinkType) { Skip "$Destination"; return }
-        Warn "$Destination exists as a real file, not a link — skipped."
+        Warn "$Destination 是真实文件而非链接——已跳过。"
         return
     }
 
-    if ($DryRun) { Dry "hardlink $Destination -> $Source"; return }
+    if ($DryRun) { Dry "将建立硬链接 $Destination -> $Source"; return }
 
-    # Hard links need no elevation, unlike symbolic links.
+    # 与符号链接不同，硬链接不需要管理员权限。
     try {
         $linkParams = @{
             ItemType = 'HardLink'
@@ -196,8 +198,8 @@ function Install-FileLink {
     }
     catch {
         Copy-Item -LiteralPath $Source -Destination $Destination -Force
-        Warn "hard link unavailable, COPIED instead: $Destination"
-        Warn "       this copy will not track repo edits."
+        Warn "硬链接不可用，已改为复制：$Destination"
+        Warn "       该副本不会跟随仓库的改动。"
     }
 }
 
@@ -236,51 +238,51 @@ function Remove-DanglingLinks {
 
 # ---------------------------------------------------------------- main
 
-Write-Head 'agent-config installer'
-Info "repo       : $RepoRoot"
-Info "codex home : $CodexHome"
-Info "zcode home : $ZcodeHome"
-Info "claude home: $ClaudeHome"
-Info "dry run    : $($DryRun.IsPresent)"
+Write-Head 'agent-config 安装器'
+Info "仓库       : $RepoRoot"
+Info "codex 目录 : $CodexHome"
+Info "zcode 目录 : $ZcodeHome"
+Info "claude 目录: $ClaudeHome"
+Info "仅报告     : $($DryRun.IsPresent)"
 
 if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'skills'))) {
-    throw "Not a agent-config repo (no skills/ under $RepoRoot)"
+    throw "这不是 agent-config 仓库（$RepoRoot 下没有 skills/）"
 }
 
-Write-Head 'Directories'
+Write-Head '目录'
 foreach ($d in @($CodexHome, $CodexSkills, $CodexAgents, $ZcodeHome, $ZcodeSkills, $ZcodeAgents, $ClaudeHome, $ClaudeSkills, $ClaudeAgents)) {
     Ensure-Directory -Path $d
 }
 
 if ($script:Disabled.Count -gt 0) {
-    Write-Head 'Disabled skills (in the repo, deliberately not linked)'
+    Write-Head '已禁用的技能（仓库中存在，刻意不建立链接）'
     foreach ($n in ($script:Disabled.Keys | Sort-Object)) {
         Off "$n"
         Info "      $($script:DisabledReason[$n])"
     }
-    Info 'Edit disabled.json and re-run to enable.'
+    Info '编辑 disabled.json 后重跑即可启用。'
 }
 
-Write-Head 'Skills -> Codex'
+Write-Head '技能 -> Codex'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($CodexSkills) -RepoPath $RepoRoot }
 
-Write-Head 'Skills -> ZCode'
+Write-Head '技能 -> ZCode'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($ZcodeSkills) -RepoPath $RepoRoot }
 
-Write-Head 'Skills -> Claude'
+Write-Head '技能 -> Claude'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($ClaudeSkills) -RepoPath $RepoRoot }
 
-Write-Head 'Agents'
+Write-Head '子 agent'
 Install-AgentFiles -RepoPath $RepoRoot -Destination $CodexAgents
 Install-AgentFiles -RepoPath $RepoRoot -Destination $ZcodeAgents
 Install-AgentFiles -RepoPath $RepoRoot -Destination $ClaudeAgents
 
-Write-Head 'Rules'
+Write-Head '规则'
 Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $CodexHome  'AGENTS.md')
 Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $ZcodeHome  'AGENTS.md')
 Install-FileLink -Source (Join-Path $RepoRoot 'rules\CLAUDE.md') -Destination (Join-Path $ClaudeHome 'CLAUDE.md')
 
-Write-Head 'Pruning dangling links'
+Write-Head '清理悬空链接'
 Remove-DanglingLinks -Destination $CodexSkills  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ZcodeSkills  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ClaudeSkills -RepoPath $RepoRoot
@@ -291,23 +293,23 @@ Remove-DanglingLinks -Destination $ClaudeAgents -RepoPath $RepoRoot
 # ---------------------------------------------------------------- upstream
 
 if ($WithUpstream) {
-    Write-Head 'Upstream skills (reinstalled from source)'
+    Write-Head '上游技能（从源头重装）'
 
     $upstreamFile = Join-Path $RepoRoot 'upstream.json'
     if (-not (Test-Path -LiteralPath $upstreamFile -PathType Leaf)) {
-        Warn "no upstream.json found; skipping"
+        Warn "未找到 upstream.json，跳过"
     }
     else {
         $entries = (Get-Content -LiteralPath $upstreamFile -Raw -Encoding utf8 | ConvertFrom-Json).skills
 
-        # Locate skill-installer's helper, which lives in the client's own skill tree.
+        # 定位 skill-installer 的辅助脚本，它位于客户端自己的技能树里。
         $installer = $null
         foreach ($root in @($CodexSkills, $ZcodeSkills, $ClaudeSkills)) {
             $candidate = Join-Path $root '.system\skill-installer\scripts\install-skill-from-github.py'
             if (Test-Path -LiteralPath $candidate -PathType Leaf) { $installer = $candidate; break }
         }
         if (-not $installer) {
-            Warn "skill-installer helper not found; install the .system skills first, then re-run."
+            Warn "未找到 skill-installer 的辅助脚本；请先让 .system 技能就位，再重跑。"
         }
         else {
             $python = $null
@@ -318,7 +320,7 @@ if ($WithUpstream) {
                 'E:\anaconda3\python.exe',
                 'D:\anaconda3\python.exe'
             )) {
-                # Reject the Microsoft Store stub: it prints an error yet exits 0.
+                # 排除微软商店的桩程序：它打印错误但退出码为 0。
                 if ($c -match 'WindowsApps') { continue }
                 if (-not (Test-Path -LiteralPath $c)) { continue }
                 $out = & $c '--version' 2>&1
@@ -326,27 +328,26 @@ if ($WithUpstream) {
             }
 
             if (-not $python) {
-                Warn "no real Python found (the WindowsApps 'python' is a stub that exits 0). Skipping."
+                Warn "未找到真实 Python（WindowsApps 下的 python 是退出码为 0 的桩程序）。跳过。"
             }
             else {
                 Info "python: $python"
-                # Upstream skills install into the CANONICAL root ($CodexSkills), which is
-                # where skill-installer defaults and where existing upstream skills already
-                # live. The other client roots then get junctions to it, matching how this
-                # machine is already laid out — never a second physical copy.
-                Info "canonical root: $CodexSkills"
+                # 上游技能装进**规范根**（$CodexSkills）：那既是 skill-installer 的默认
+                # 目标，也是现有上游技能实际所在的位置。另两个客户端根随后链接到它，
+                # 与本机既有布局一致——始终只有一份物理拷贝。
+                Info "规范根：$CodexSkills"
 
                 foreach ($e in $entries) {
                     $dest = Join-Path $CodexSkills $e.name
                     Info "--- $($e.name)  ($($e.repo)@$($e.ref), license $($e.license))"
                     if ($e.license -like 'CC-BY-NC*') {
-                        Warn "non-commercial license: $($e.license_note)"
+                        Warn "非商业许可：$($e.license_note)"
                     }
                     if (Test-Path -LiteralPath $dest) {
-                        if ($DryRun) { Dry "would remove and reinstall $dest"; continue }
+                        if ($DryRun) { Dry "将删除并重装 $dest"; continue }
                         Remove-Item -LiteralPath $dest -Recurse -Force
                     }
-                    if ($DryRun) { Dry "would run the installer for $($e.path)"; continue }
+                    if ($DryRun) { Dry "将为 $($e.path) 运行安装器"; continue }
 
                     $argList = @(
                         $installer
@@ -360,22 +361,22 @@ if ($WithUpstream) {
                     & $python @argList
                     $exit = $LASTEXITCODE
                     if ($exit -ne 0) {
-                        Warn "installer failed for $($e.name) (exit $exit)"
+                        Warn "$($e.name) 安装失败（退出码 $exit）"
                         continue
                     }
-                    Ok "installed $($e.name) -> $CodexSkills"
+                    Ok "已安装 $($e.name) -> $CodexSkills"
 
                     foreach ($otherRoot in @($ZcodeSkills, $ClaudeSkills)) {
                         $otherLink = Join-Path $otherRoot $e.name
                         if (Test-Path -LiteralPath $otherLink) { Skip "$otherLink"; continue }
-                        if ($DryRun) { Dry "junction $otherLink -> $dest"; continue }
+                        if ($DryRun) { Dry "将建立 junction $otherLink -> $dest"; continue }
                         $lp = @{ ItemType = 'Junction'; Path = $otherLink; Target = $dest }
                         try {
                             New-Item @lp | Out-Null
                             Ok "junction $($e.name) -> $(Split-Path -Leaf $otherRoot)"
                         }
                         catch {
-                            Warn "junction failed for $otherLink : $($_.Exception.Message)"
+                            Warn "junction 创建失败：$otherLink : $($_.Exception.Message)"
                         }
                     }
                 }
@@ -384,7 +385,7 @@ if ($WithUpstream) {
     }
 }
 
-Write-Head 'Done'
+Write-Head '完成'
 if ($DryRun) { Info 'Dry run: nothing was written.' }
-Info 'Restart the agent (new conversation) so the skill list reloads.'
-Info 'Run scripts\doctor.ps1 to verify.'
+Info '请新开一个对话——技能列表在会话启动时加载。'
+Info '用 scripts\doctor.ps1 验证。'

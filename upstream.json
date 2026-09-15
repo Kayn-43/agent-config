@@ -1,5 +1,5 @@
 {
-  "note": "Provenance for third-party skills. Content is intentionally NOT vendored into this repo: copying propagates version drift, so these are reinstalled from source by scripts/install.ps1 -WithUpstream. Record repo/ref/path only.",
+  "note": "第三方技能的来源记录。内容刻意不内嵌进本仓库：拷贝会把版本陈旧一并带走，所以这些技能由 scripts/install.ps1 -WithUpstream 从源头重装。此处只记录 repo/ref/path。",
   "skills": [
     {
       "name": "powershell-safe-invocation",
@@ -7,8 +7,8 @@
       "ref": "main",
       "path": "skills/powershell-safe-invocation",
       "license": "MIT",
-      "license_note": "MIT — redistribution permitted with attribution.",
-      "why_reinstall": "A local copy sat one commit behind upstream for two weeks (installed 2026-08-15; upstream fixed it 2026-08-28) precisely because it had been copied rather than installed."
+      "license_note": "MIT —— 允许再分发，需保留署名。",
+      "why_reinstall": "本地副本曾落后上游整整两个星期（2026-08-15 安装，上游 2026-08-28 才修复），正是因为它当初是被“拷贝”而不是被“安装”的。"
     },
     {
       "name": "academic-research-suite",
@@ -16,8 +16,8 @@
       "ref": "main",
       "path": "skills/academic-research-suite",
       "license": "CC-BY-NC-4.0",
-      "license_note": "Attribution-NonCommercial 4.0. NOT open source: commercial use is prohibited. Use this Codex-native repo, not the Claude-Code sibling Imbad0202/academic-research-skills (same license).",
-      "why_reinstall": "Large (2371 files, ~35 MB) and actively developed; vendoring it would both bloat this repo and freeze a stale snapshot."
+      "license_note": "署名-非商业 4.0。**不是**开源许可：禁止商业用途。使用这个 Codex 原生仓库，不要用 Claude Code 的姊妹仓库 Imbad0202/academic-research-skills（同一许可）。",
+      "why_reinstall": "体积大（2371 个文件，约 35 MB）且仍在活跃开发；内嵌进本仓库既会让仓库膨胀，也会冻结一个陈旧快照。"
     }
   ]
 }

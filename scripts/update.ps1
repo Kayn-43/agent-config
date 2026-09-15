@@ -1,19 +1,17 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Pull the latest agent-config, then re-link everything.
+    拉取最新 agent-config，然后重新链接全部内容。
 
 .DESCRIPTION
-    Because installation uses junctions and hard links, updating the repo content is
-    usually enough on its own — linked files reflect edits immediately. This script
-    additionally re-runs the installer so that newly added or deleted skills are
-    linked and pruned.
+    由于安装使用 junction 和硬链接，通常只更新仓库内容就够了——链接文件会立即
+    反映改动。本脚本额外重跑安装器，以便新增或删除的技能被正确链接和清理。
 
 .PARAMETER Proxy
-    HTTP proxy for git, e.g. http://127.0.0.1:7897. Read from local/hosts.yaml when omitted.
+    用于 git 的 HTTP 代理，例如 http://127.0.0.1:7897。省略时从 local/hosts.yaml 读取。
 
 .PARAMETER SkipPull
-    Skip git pull (useful when the repo was updated by other means).
+    跳过 git pull（适用于仓库已通过其他方式更新的情况）。
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\update.ps1
@@ -31,18 +29,18 @@ $installer = Join-Path $PSScriptRoot 'install.ps1'
 
 function Write-Head { param([string] $Text) Write-Host ''; Write-Host ('=' * 62); Write-Host $Text; Write-Host ('=' * 62) }
 
-Write-Head 'agent-config update'
-Write-Host "  repo: $RepoRoot"
+Write-Head 'agent-config 更新'
+Write-Host "  仓库：$RepoRoot"
 
 if (-not $SkipPull) {
     if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git'))) {
-        Write-Host '  [warn] not a git repository; skipping pull' -ForegroundColor Yellow
+        Write-Host '  [warn] 不是 git 仓库，跳过拉取' -ForegroundColor Yellow
     }
     else {
         $dirty = @(& git -C $RepoRoot status --porcelain 2>&1)
         if ($dirty.Count -gt 0) {
-            Write-Host "  [warn] $($dirty.Count) uncommitted local change(s) — not pulling." -ForegroundColor Yellow
-            Write-Host '         Commit, stash, or discard them first, then re-run.'
+            Write-Host "  [warn] 有 $($dirty.Count) 处未提交改动——不执行拉取。" -ForegroundColor Yellow
+            Write-Host '         请先提交、暂存或丢弃这些改动，然后重跑。'
             $dirty | Select-Object -First 10 | ForEach-Object { Write-Host "         $_" }
         }
         else {
@@ -56,29 +54,29 @@ if (-not $SkipPull) {
             if ($Proxy) {
                 $env:HTTPS_PROXY = $Proxy
                 $env:HTTP_PROXY  = $Proxy
-                Write-Host "  using proxy: $Proxy"
+                Write-Host "  使用代理：$Proxy"
             }
 
             Write-Host '  git pull --rebase'
             & git -C $RepoRoot pull --rebase
             $exit = $LASTEXITCODE
             if ($exit -ne 0) {
-                Write-Host "  [warn] git pull failed (exit $exit)" -ForegroundColor Yellow
-                Write-Host '         Continuing: linked content still reflects whatever is on disk.'
+                Write-Host "  [warn] git pull 失败（退出码 $exit）" -ForegroundColor Yellow
+                Write-Host '         继续执行：链接内容仍反映磁盘上的现状。'
             }
             else {
-                Write-Host '  [ok] up to date' -ForegroundColor Green
+                Write-Host '  [ok] 已是最新' -ForegroundColor Green
             }
         }
     }
 }
 
-Write-Head 'Refreshing links'
+Write-Head '刷新链接'
 & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $installer
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  [warn] installer exited $LASTEXITCODE" -ForegroundColor Yellow
+    Write-Host "  [warn] 安装器退出码 $LASTEXITCODE" -ForegroundColor Yellow
 }
 
-Write-Head 'Done'
-Write-Host '  Restart the agent (new conversation) so the skill list reloads.'
-Write-Host '  Run scripts\doctor.ps1 to verify.'
+Write-Head '完成'
+Write-Host '  请新开一个对话——技能列表在会话启动时加载。'
+Write-Host '  用 scripts\doctor.ps1 验证。'

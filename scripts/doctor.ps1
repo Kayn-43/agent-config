@@ -1,15 +1,14 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Diagnose why a skill or agent is not visible to the agent client.
+    诊断技能或 agent 为什么在客户端里看不到。
 
 .DESCRIPTION
-    Reports: which paths exist; the link type and target of every installed entry;
-    entries that are REAL directories where a link was expected (they drift);
-    dangling links whose target was deleted from the repo; divergence between the
-    two rule files; local host configuration; and GitHub proxy reachability.
+    报告内容：各路径是否存在；每个已安装条目的链接类型与目标；本应是链接却是
+    **真实目录**的条目（它们会失同步）；目标已从仓库删除的悬空链接；两个规则
+    文件是否分叉；本机主机配置；以及 GitHub 代理可达性。
 
-    Read-only. Changes nothing.
+    只读，不改动任何东西。
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\doctor.ps1
@@ -33,7 +32,7 @@ function Add-Problem { param([string] $Text) [void]$problems.Add($Text) }
 
 # ---------------------------------------------------------------- paths
 
-Write-Head 'Paths'
+Write-Head '路径'
 
 $checks = @(
     @{ Name = 'repo root'          ; Path = $RepoRoot },
@@ -60,10 +59,10 @@ foreach ($c in $checks) {
     else {
         Write-Host ("  [MISS] {0,-18} {1}" -f $c.Name, $c.Path) -ForegroundColor Yellow
         if ($c.Name -eq 'local/hosts.yaml') {
-            Write-Host "         copy local/hosts.example.yaml to local/hosts.yaml and fill it in"
+            Write-Host "         把 local/hosts.example.yaml 复制为 local/hosts.yaml 并填入真实值"
         }
         else {
-            Add-Problem "missing: $($c.Name) at $($c.Path)"
+            Add-Problem "缺失：$($c.Name) 于 $($c.Path)"
         }
     }
 }
@@ -74,10 +73,10 @@ function Show-Links {
     param([string] $Title, [string] $Path, [string] $RepoPath)
 
     Write-Head $Title
-    if (-not (Test-Path -LiteralPath $Path)) { Write-Host '  (directory does not exist)'; return }
+    if (-not (Test-Path -LiteralPath $Path)) { Write-Host '  （目录不存在）'; return }
 
     $entries = @(Get-ChildItem -LiteralPath $Path -Force | Sort-Object Name)
-    if ($entries.Count -eq 0) { Write-Host '  (empty)'; return }
+    if ($entries.Count -eq 0) { Write-Host '  （空）'; return }
 
     $rows = foreach ($e in $entries) {
         $type = if ($e.LinkType) { $e.LinkType } else { 'REAL' }
@@ -99,9 +98,9 @@ function Show-Links {
         }
 
         if (-not $e.LinkType) {
-            # Real content where a link was expected: it will silently drift.
+            # 本应是链接、却是真实内容：它会静默失同步。
             if ($e.Name -in @('common','research','remote') -or (Test-Path -LiteralPath (Join-Path $RepoPath (Join-Path 'skills' $e.Name)))) {
-                Add-Problem "REAL directory (not a link, will drift): $($e.FullName)"
+                Add-Problem "真实目录（不是链接，会失同步）：$($e.FullName)"
             }
             continue
         }
@@ -109,22 +108,22 @@ function Show-Links {
         if ($pointsIn) {
             $target = ($e.Target -join ',')
             if (-not (Test-Path -LiteralPath $target)) {
-                Add-Problem "dangling link (target gone): $($e.FullName) -> $target"
+                Add-Problem "悬空链接（目标已不存在）：$($e.FullName) -> $target"
             }
         }
     }
 }
 
-Show-Links -Title 'Codex skills'  -Path (Join-Path $CodexHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
-Show-Links -Title 'Codex agents'  -Path (Join-Path $CodexHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
-Show-Links -Title 'ZCode skills'  -Path (Join-Path $ZcodeHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
-Show-Links -Title 'ZCode agents'  -Path (Join-Path $ZcodeHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
-Show-Links -Title 'Claude skills' -Path (Join-Path $ClaudeHome 'skills') -RepoPath (Join-Path $RepoRoot 'skills')
-Show-Links -Title 'Claude agents' -Path (Join-Path $ClaudeHome 'agents') -RepoPath (Join-Path $RepoRoot 'agents')
+Show-Links -Title 'Codex 技能'  -Path (Join-Path $CodexHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
+Show-Links -Title 'Codex 子 agent'  -Path (Join-Path $CodexHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
+Show-Links -Title 'ZCode 技能'  -Path (Join-Path $ZcodeHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
+Show-Links -Title 'ZCode 子 agent'  -Path (Join-Path $ZcodeHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
+Show-Links -Title 'Claude 技能' -Path (Join-Path $ClaudeHome 'skills') -RepoPath (Join-Path $RepoRoot 'skills')
+Show-Links -Title 'Claude 子 agent' -Path (Join-Path $ClaudeHome 'agents') -RepoPath (Join-Path $RepoRoot 'agents')
 
 # ---------------------------------------------------------------- rule drift
 
-Write-Head 'Rule file consistency'
+Write-Head '规则文件一致性'
 
 $a = Join-Path $RepoRoot 'rules\AGENTS.md'
 $c = Join-Path $RepoRoot 'rules\CLAUDE.md'
@@ -132,29 +131,28 @@ if ((Test-Path -LiteralPath $a) -and (Test-Path -LiteralPath $c)) {
     $ha = (Get-FileHash -LiteralPath $a -Algorithm SHA256).Hash
     $hc = (Get-FileHash -LiteralPath $c -Algorithm SHA256).Hash
     if ($ha -eq $hc) {
-        Write-Host '  [OK]   AGENTS.md and CLAUDE.md are identical' -ForegroundColor Green
+        Write-Host '  [OK]   AGENTS.md 与 CLAUDE.md 内容一致' -ForegroundColor Green
     }
     else {
-        # The two files are deliberately separate (the clients read different names),
-        # so they can drift apart silently.
-        Write-Host '  [WARN] AGENTS.md and CLAUDE.md DIFFER' -ForegroundColor Yellow
+        # 这两份文件是刻意分开的（两个客户端读的文件名不同），
+        # 所以它们可能在无人察觉的情况下分叉。
+        Write-Host '  [WARN] AGENTS.md 与 CLAUDE.md 内容不一致' -ForegroundColor Yellow
         Write-Host "         $a"
         Write-Host "         $c"
-        Add-Problem 'rules/AGENTS.md and rules/CLAUDE.md have diverged'
+        Add-Problem 'rules/AGENTS.md 与 rules/CLAUDE.md 已分叉'
     }
 }
 else {
-    Add-Problem 'one of the rule files is missing'
+    Add-Problem '其中一个规则文件缺失'
 }
 
 # ---------------------------------------------------------------- freshness
 
-Write-Head 'Linked content freshness'
+Write-Head '链接内容新鲜度'
 
-# Hard links break SILENTLY when an editor replaces the repo file: the repo gets a
-# new inode, every existing link keeps pointing at the old one, and the home copy
-# serves stale content while still reporting LinkType=HardLink. Link type therefore
-# proves nothing here — compare content.
+# 硬链接会在编辑器替换仓库文件时**静默失效**：仓库得到新 inode，而每个既有链接
+# 仍指向旧 inode，客户端那份继续提供陈旧内容，同时 LinkType 依然报 HardLink。
+# 所以链接类型在这里什么都证明不了——必须比对内容。
 $pairs = @(
     @{ Home = (Join-Path $CodexHome  'AGENTS.md'); Source = (Join-Path $RepoRoot 'rules\AGENTS.md') },
     @{ Home = (Join-Path $ZcodeHome  'AGENTS.md'); Source = (Join-Path $RepoRoot 'rules\AGENTS.md') },
@@ -186,70 +184,70 @@ foreach ($p in $pairs) {
     if ($item.LinkType) {
         $staleLinks++
         Write-Host "  [STALE] $($p.Home)" -ForegroundColor Red
-        Write-Host "          is a $($item.LinkType) but its content differs from the repo copy"
-        Add-Problem "stale $($item.LinkType): $($p.Home) does not match $($p.Source)"
+        Write-Host "          类型是 $($item.LinkType)，但内容与仓库副本不一致"
+        Add-Problem "陈旧 $($item.LinkType)：$($p.Home) 与 $($p.Source) 不一致"
     }
     else {
         $localVariants++
         Write-Host "  [local] $($p.Home)" -ForegroundColor DarkGray
-        Write-Host '          real file, differs from the repo copy — expected for a local variant'
+        Write-Host '          真实文件，与仓库副本不同——属预期的本机变体'
     }
 }
 
 if ($staleLinks -eq 0 -and $localVariants -eq 0) {
-    Write-Host '  [OK]   every rule/agent file matches its repo source' -ForegroundColor Green
+    Write-Host '  [OK]   所有规则/agent 文件都与仓库源一致' -ForegroundColor Green
 }
 if ($staleLinks -gt 0) {
     Write-Host ''
-    Write-Host '  Stale links serve outdated content. Fix: delete the home copy, then re-run' -ForegroundColor Yellow
-    Write-Host '  scripts\install.ps1 to re-link. (Reproducing a real agent-config case: two' -ForegroundColor Yellow
-    Write-Host '  rule files were translated, and the existing hard links kept the old text.)' -ForegroundColor Yellow
+    Write-Host '  陈旧链接会提供过期内容。修法：删掉客户端目录下那份，再跑' -ForegroundColor Yellow
+    Write-Host '  scripts\install.ps1 重新链接。（本仓库真实遇到过：两个规则文件被翻译后，' -ForegroundColor Yellow
+    Write-Host '  既有的硬链接仍保留着旧文本。）' -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------- repo state
 
-Write-Head 'Repository state'
+Write-Head '仓库状态'
 
 if (Test-Path -LiteralPath (Join-Path $RepoRoot '.git')) {
     $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>&1) -join ''
     $dirty  = @(& git -C $RepoRoot status --porcelain 2>&1)
-    Write-Host "  branch : $branch"
+    Write-Host "  分支   : $branch"
     if ($dirty.Count -eq 0) {
-        Write-Host '  [OK]   working tree clean' -ForegroundColor Green
+        Write-Host '  [OK]   工作区干净' -ForegroundColor Green
     }
     else {
-        Write-Host "  [WARN] $($dirty.Count) uncommitted change(s)" -ForegroundColor Yellow
+        Write-Host "  [WARN] 有 $($dirty.Count) 处未提交改动" -ForegroundColor Yellow
         $dirty | Select-Object -First 10 | ForEach-Object { Write-Host "         $_" }
     }
     $remote = (& git -C $RepoRoot remote get-url origin 2>&1) -join ''
-    Write-Host "  origin : $remote"
+    Write-Host "  远端   : $remote"
 
-    # Guard against ever committing local-only values.
+    # 防止把仅属于本机的值误提交进仓库。
     $tracked = @(& git -C $RepoRoot ls-files 2>&1)
     $leaks = $tracked | Where-Object { $_ -match '^local/' -and $_ -notmatch 'hosts\.example\.yaml$' }
     if ($leaks.Count -gt 0) {
-        Write-Host '  [FAIL] local/ files are TRACKED by git:' -ForegroundColor Red
+        Write-Host '  [FAIL] local/ 下的文件被 git 跟踪了：' -ForegroundColor Red
         $leaks | ForEach-Object { Write-Host "         $_" }
-        Add-Problem 'machine-specific local/ files are tracked by git'
+        Add-Problem '机器相关的 local/ 文件被 git 跟踪'
     }
     else {
-        Write-Host '  [OK]   no local/ files tracked' -ForegroundColor Green
+        Write-Host '  [OK]   没有 local/ 文件被跟踪' -ForegroundColor Green
     }
 }
 else {
-    Write-Host '  (not a git repository)'
-    Add-Problem 'repo root is not a git repository'
+    Write-Host '  （不是 git 仓库）'
+    Add-Problem '仓库根目录不是 git 仓库'
 }
 
 # ---------------------------------------------------------------- environment
 
-Write-Head 'Environment'
+Write-Head '环境'
 
 $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-if ($pwsh) { Write-Host "  [OK]   pwsh present: $($pwsh.Source)" -ForegroundColor Green }
-else { Write-Host '  [warn] pwsh (PowerShell 7) not found; scripts fall back to 5.1 rules' -ForegroundColor Yellow }
+if ($pwsh) { Write-Host "  [OK]   已安装 pwsh：$($pwsh.Source)" -ForegroundColor Green }
+else { Write-Host '  [warn] 未找到 pwsh（PowerShell 7）；脚本回落到 5.1 规则' -ForegroundColor Yellow }
 
-# The WindowsApps python is a stub that prints an error yet exits 0, so check output.
+# WindowsApps 下的 python 是桩程序，会打印错误但退出码为 0，所以要检查输出。
 $python = $null
 foreach ($c in @(
     (Join-Path $HOME 'anaconda3\python.exe'),
@@ -263,13 +261,13 @@ foreach ($c in @(
     $out = & $c '--version' 2>&1
     if (($out -join ' ') -match 'Python\s+3\.') { $python = $c; break }
 }
-if ($python) { Write-Host "  [OK]   real python: $python" -ForegroundColor Green }
-else { Write-Host '  [warn] no real Python (needed only for -WithUpstream)' -ForegroundColor Yellow }
+if ($python) { Write-Host "  [OK]   真实 Python：$python" -ForegroundColor Green }
+else { Write-Host '  [warn] 未找到真实 Python（仅 -WithUpstream 需要）' -ForegroundColor Yellow }
 
 $effective = Get-ExecutionPolicy
-Write-Host "  execution policy: $effective"
+Write-Host "  执行策略：$effective"
 if ($effective -eq 'Restricted') {
-    Write-Host '         a bare .\script.ps1 will be refused; use:' -ForegroundColor Yellow
+    Write-Host '         裸写 .\script.ps1 会被拒绝，请改用：' -ForegroundColor Yellow
     Write-Host '         powershell -ExecutionPolicy Bypass -File <full path>'
 }
 
@@ -284,26 +282,26 @@ if ($Proxy) {
     try {
         $probe = Join-Path ([System.IO.Path]::GetTempPath()) ('doctor-probe-' + [guid]::NewGuid().ToString('N'))
         Invoke-WebRequest -Uri 'https://github.com' -Proxy $Proxy -TimeoutSec 15 -UseBasicParsing -OutFile $probe
-        Write-Host "  [OK]   proxy reachable: $Proxy" -ForegroundColor Green
+        Write-Host "  [OK]   代理可达：$Proxy" -ForegroundColor Green
         Remove-Item -LiteralPath $probe -Force
     }
     catch {
-        Write-Host "  [warn] proxy probe failed: $Proxy" -ForegroundColor Yellow
+        Write-Host "  [warn] 代理探测失败：$Proxy" -ForegroundColor Yellow
     }
 }
 else {
-    Write-Host '  proxy: not configured (fine unless GitHub is blocked here)'
+    Write-Host '  代理：未配置（除非本机访问 GitHub 受阻，否则无妨）'
 }
 
 # ---------------------------------------------------------------- verdict
 
-Write-Head 'Verdict'
+Write-Head '结论'
 if ($problems.Count -eq 0) {
-    Write-Host '  No problems found.' -ForegroundColor Green
+    Write-Host '  未发现问题。' -ForegroundColor Green
 }
 else {
-    Write-Host "  $($problems.Count) problem(s):" -ForegroundColor Yellow
+    Write-Host "  发现 $($problems.Count) 个问题：" -ForegroundColor Yellow
     foreach ($p in $problems) { Write-Host "    - $p" }
     Write-Host ''
-    Write-Host '  Tip: re-run scripts\install.ps1 to recreate missing links and prune dangling ones.'
+    Write-Host '  提示：重跑 scripts\install.ps1 可重建缺失的链接并清理悬空链接。'
 }
