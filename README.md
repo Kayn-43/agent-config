@@ -73,7 +73,6 @@ skills/
 agents/       fast-worker, long-worker, verifier, researcher
 rules/        AGENTS.md, CLAUDE.md
 scripts/      install.ps1, update.ps1, doctor.ps1
-local/        hosts.yaml（被 gitignore）+ hosts.example.yaml
 ```
 
 技能按**能力**分组，不按机器分组。只有一个 `remote/ubuntu`，而不是
@@ -117,12 +116,10 @@ cd agent-config
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-然后配置主机：
+然后恢复机器身份：
 
-```powershell
-Copy-Item .\local\hosts.example.yaml .\local\hosts.yaml
-# 编辑 local/hosts.yaml，填入真实端点（该文件已被 gitignore）
-```
+**端点、端口、密钥路径、密码不在本仓库，也不在私有仓库。** 它们放在 `~/.agent-local/`（永不进 Git）。
+在该目录下按 `hosts.yaml` 的结构填写真实值；各技能的「本地配置」一节给出了所需字段。
 
 ## 更新
 
@@ -168,17 +165,22 @@ Junction 没有这个问题：它指向目录，目录内文件被替换对它�
 
 ## 机密信息策略
 
-本仓库是**公开**的，任何环境相关的值都不得提交：
+本仓库是**公开**的。任何机器身份或凭据都不得提交——**本仓库里不存在也不应存在 `local/` 目录**：
 
 | 绝不提交 | 存放位置 |
 |---|---|
-| 主机名、IP、端口 | `local/hosts.yaml`（被 gitignore） |
-| SSH 用户名、密钥路径 | `local/hosts.yaml` |
-| 主机密钥指纹 | `local/hosts.yaml` |
-| 私钥 | 永不进本仓库。每台机器各自生成，再到服务器端授权。 |
+| 主机名、IP、端口 | `~/.agent-local/hosts.yaml` |
+| SSH 用户名、密钥路径 | `~/.agent-local/hosts.yaml` |
+| 主机密钥指纹 | `~/.agent-local/hosts.yaml` |
+| 密码 / Token | `~/.agent-local/`（含 askpass 脚本） |
+| 私钥 | 永不进任何仓库。每台机器各自生成，再到服务器授权。 |
 | 机器相关的模型绑定 | 本机 agent 配置——`agents/*.md` 里刻意不含 `model:` 字段 |
 
-因此技能只按**别名**引用主机。
+因此技能只按**别名**引用主机，并声明「从 `~/.agent-local/hosts.yaml` 读取」。
+
+> 这条边界是**硬的**：`doctor.ps1` 会检查本仓库是否出现 `hosts.yaml`、`askpass*`、`*.key`、`*.pem` 等文件，出现即 FAIL。
+> 不保留任何"本地配置示例文件"——否则半年后会分不清该照哪个模板维护。
+
 
 ## 上游技能（安装但不内嵌）
 

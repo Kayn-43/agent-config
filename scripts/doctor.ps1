@@ -293,6 +293,132 @@ else {
     Write-Host '  代理：未配置（除非本机访问 GitHub 受阻，否则无妨）'
 }
 
+# ---------------------------------------------------------------- 架构边界
+
+Write-Head '架构边界（三层结构）'
+
+$PrivateRoot = Join-Path $HOME 'agent-config-private'
+$AgentLocal  = Join-Path $HOME '.agent-local'
+
+function Add-Fail {
+    param([string] $Text)
+    Write-Host "  [FAIL] $Text" -ForegroundColor Red
+    Add-Problem $Text
+}
+
+# --- 允许在 .codex/skills 下以真实目录存在的名字 -----------------------------
+# 客户端目录只是消费者。原创内容必须来自 Git 仓库，不能直接写在客户端目录里。
+$allowedReal = @('.system')
+$upstreamFile = Join-Path $RepoRoot 'upstream.json'
+if (Test-Path -LiteralPath $upstreamFile -PathType Leaf) {
+    $allowedReal += @(
+        (Get-Content -LiteralPath $upstreamFile -Raw -Encoding utf8 | ConvertFrom-Json).skills |
+            ForEach-Object { $_.name }
+    )
+}
+
+$consumerRoots = @(
+    @{ Root = (Join-Path $CodexHome  'skills'); Allowed = $allowedReal },
+    @{ Root = (Join-Path $ZcodeHome  'skills'); Allowed = @() },
+    @{ Root = (Join-Path $ClaudeHome 'skills'); Allowed = @() }
+)
+
+foreach ($c in $consumerRoots) {
+    if (-not (Test-Path -LiteralPath $c.Root)) { continue }
+    $real = @(Get-ChildItem -LiteralPath $c.Root -Force | Where-Object { -not $_.LinkType })
+    if ($real.Count -eq 0) {
+        Write-Host "  [ok]   $($c.Root) : 无真实技能目录" -ForegroundColor Green
+        continue
+    }
+    foreach ($e in $real) {
+        if ($c.Allowed -contains $e.Name) {
+            Write-Host "  [ok]   $($c.Root) : $($e.Name)（声明过的真实目录）" -ForegroundColor Green
+        }
+        else {
+            Add-Fail "FAIL: unmanaged real skill detected -> $($e.FullName)"
+        }
+    }
+}
+
+# --- 仓库里不得出现机器身份 / 凭据文件 ---------------------------------------
+$forbiddenRegex = '^(hosts\.yaml|hosts\..*\.yaml|askpass.*|.*\.key|.*\.pem|.*\.secret|\.env|\.env\..*)$'
+
+$repoRoots = @($RepoRoot)
+if (Test-Path -LiteralPath $PrivateRoot) { $repoRoots += $PrivateRoot }
+
+foreach ($root in $repoRoots) {
+    $label = Split-Path -Leaf $root
+
+    # 工作区里的文件（按文件名判断——技能正文里会提到 hosts.yaml，所以不能按内容判断）
+    $hits = @(
+        Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\\.git\\' -and $_.Name -match $forbiddenRegex }
+    )
+    foreach ($h in $hits) {
+        Add-Fail "FAIL: credential-shaped file in ${label}: $($h.FullName)"
+    }
+
+    # 已跟踪的文件（防止历史上提交过、现在被 gitignore 掩盖）
+    if (Test-Path -LiteralPath (Join-Path $root '.git')) {
+        $bad = @(& git -C $root ls-files 2>&1 | Where-Object { (Split-Path -Leaf $_) -match $forbiddenRegex })
+        foreach ($b in $bad) {
+            Add-Fail "FAIL: credential-shaped file TRACKED in ${label}: $b"
+        }
+
+        # 私钥内容的最后一道闸（很低的误报率）
+        foreach ($rel in @(& git -C $root ls-files 2>&1)) {
+            $p = Join-Path $root $rel
+            if (-not (Test-Path -LiteralPath $p -PathType Leaf)) { continue }
+            if ((Get-Item -LiteralPath $p).Length -gt 2MB) { continue }
+            $text = [System.IO.File]::ReadAllText($p, [System.Text.Encoding]::UTF8)
+            if ($text -match 'BEGIN [A-Z ]*PRIVATE KEY') {
+                Add-Fail "FAIL: private key material in ${label}: $rel"
+            }
+        }
+    }
+    else {
+        Add-Fail "FAIL: not a git repository -> $root"
+    }
+}
+
+# --- ~/.agent-local 必须与 Git 彻底隔离 --------------------------------------
+if (-not (Test-Path -LiteralPath $AgentLocal)) {
+    Write-Host '  [warn] ~/.agent-local 不存在（新机器需先恢复它）' -ForegroundColor Yellow
+}
+else {
+    if ((Get-Item -LiteralPath $AgentLocal -Force).LinkType) {
+        Add-Fail "FAIL: ~/.agent-local itself is a link: $AgentLocal"
+    }
+    if (Test-Path -LiteralPath (Join-Path $AgentLocal '.git')) {
+        Add-Fail "FAIL: ~/.agent-local contains a .git directory"
+    }
+    $backLinks = @(
+        Get-ChildItem -LiteralPath $AgentLocal -Recurse -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.LinkType }
+    )
+    foreach ($b in $backLinks) {
+        $t = ($b.Target -join ',')
+        if ((Test-PointsIntoRepo -Target $t -RepoPath $RepoRoot) -or
+            ($PrivateRoot -and (Test-PointsIntoRepo -Target $t -RepoPath $PrivateRoot))) {
+            Add-Fail "FAIL: ~/.agent-local contains a link back into a Git repo: $($b.FullName)"
+        }
+    }
+    Write-Host "  [ok]   ~/.agent-local : 与 Git 仓库隔离（检查了 $((@(Get-ChildItem -LiteralPath $AgentLocal -Force)).Count) 个顶层条目）" -ForegroundColor Green
+}
+
+# --- 两个仓库必须 clean ------------------------------------------------------
+foreach ($root in $repoRoots) {
+    $label = Split-Path -Leaf $root
+    if (-not (Test-Path -LiteralPath (Join-Path $root '.git'))) { continue }
+    $dirty = @(& git -C $root status --porcelain 2>&1)
+    if ($dirty.Count -eq 0) {
+        Write-Host "  [ok]   ${label} : 工作区干净" -ForegroundColor Green
+    }
+    else {
+        Add-Fail "FAIL: ${label} has $($dirty.Count) uncommitted change(s)"
+    }
+}
+
 # ---------------------------------------------------------------- verdict
 
 Write-Head '结论'

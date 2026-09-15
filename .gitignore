@@ -1,18 +1,27 @@
-# ---- Local, machine-specific configuration (never commit) --------------------
-# NOTE: `local/*` rather than `local/`. Excluding the whole directory stops git
-# from descending into it, which makes the `!` negation below silently useless —
-# the example file would never be committed.
-local/*
-!local/hosts.example.yaml
+# ---- 机器身份与凭据不在本仓库 ------------------------------------------------
+#
+# 端点、端口、用户名、密钥路径、指纹、密码一律存放在 ~/.agent-local/（永不进 Git，
+# 包括私有仓库）。本仓库不该出现任何 `.yaml`/`.key`/`.pem`/askpass 之类的机器配置文件。
+#
+# 下面这些模式是防御性的：万一有人误放，doctor.ps1 会直接 FAIL。
 
-# ---- Editor / OS noise ------------------------------------------------------
+hosts.yaml
+hosts.*.yaml
+askpass*
+*.key
+*.pem
+*.secret
+.env
+.env.*
+
+# ---- 编辑器与系统噪音 ------------------------------------------------------
 .vscode/
 .idea/
 *.swp
 Thumbs.db
 desktop.ini
 
-# ---- Agent runtime state that must never be tracked -------------------------
+# ---- 运行时状态 ------------------------------------------------------------
 *.log
 .cache/
 tmp/
