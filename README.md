@@ -35,13 +35,41 @@ Linux 侧的配置，需要单独安装。这不在本仓库的范围内。
 一个技能自身存放在什么系统上，与它操作什么系统无关——`skills/remote/*` 存在
 Windows 上，但它教 agent 如何操作远程 Linux 主机。
 
+## 三层结构
+
+知识按「性质」分三层，而不是按「在不在 Git 里」分两层：
+
+```
+agent-config（本仓库，Public）        = 我学会了什么
+    通用知识、通用技能、安全规则。任何人可读。
+
+agent-config-private（Private）      = 我的项目是什么
+    未发表研究、私有仓库工作流、协作分工。
+    需要版本控制，但不能公开。
+
+~/.agent-local（永不进 Git）          = 我是谁、机器怎么登录
+    端点、端口、密码、Token、私钥、主机指纹。
+```
+
+**为什么中间层必须单独存在**：把未发表内容放进 public 仓库会提前公开研究；放进 gitignore 的 `local/` 又会掉回「没有版本控制、没有远端备份」。两者都不对，所以需要一个私有仓库。
+
+**为什么最内层永远不进 Git——包括私有仓库**：Private Git 提供的是**访问控制**，不是**密钥管理**。一旦密码被提交，即使之后删掉文件，它仍然留在 Git 历史里，克隆者、备份、fork 都能取到。
+
+因此技能里**不写端点、不写密码**，只写「从 `~/.agent-local/hosts.yaml` 按别名读取」。技能因此可以公开、可以共享。
+
+### 安装时两个仓库都会处理
+
+`install.ps1` 默认自动探测 `~/agent-config-private` 并把它的技能一并链接（用 `-SkipPrivate` 关闭，或用 `-ExtraRepo <路径>` 指定别处）。
+
 ## 目录结构
 
 ```
 skills/
   common/     code-review, repo-audit, paper-reading, experiment-review
   research/   isaac-sim, embodied-ai, paper-reproduction
-  remote/     ubuntu, gpu-debug, ssh-debug, server-safety
+  remote/     ssh-debug, gpu-debug, server-safety,
+              ubuntu20-experiment, ubuntu24-experiment,
+              ubuntu（已禁用，见 disabled.json）
 agents/       fast-worker, long-worker, verifier, researcher
 rules/        AGENTS.md, CLAUDE.md
 scripts/      install.ps1, update.ps1, doctor.ps1

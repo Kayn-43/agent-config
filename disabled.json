@@ -4,7 +4,7 @@
     {
       "name": "ubuntu",
       "disabled_on": "2026-09-15",
-      "reason": "与仍在使用的、面向具体机器的 ubuntu20-experiment 和 ubuntu24-experiment 功能重叠。这个面向能力的 ubuntu 技能要等那两个退役之后才接管。等删除旧技能后再启用。",
+      "reason": "已被两个环境工作流技能取代：skills/remote/ubuntu20-experiment 与 skills/remote/ubuntu24-experiment（2026-09-16 加入）。这个「按发行版运行时分支」的通用 ubuntu 技能与它们重叠，而实际有效的组织方式是按实例划分环境知识。保留文件仅供回退参考；确认无碍后可删除本条目与对应目录。",
       "owner": "kayn"
     }
   ]

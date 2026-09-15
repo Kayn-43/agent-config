@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ubuntu 24 实验环境"
+  short_description: "通过 SSH 在指定的 Ubuntu 24 容器上运行实验、传输大文件与下载模型"
+  default_prompt: "$ubuntu24-experiment 在这个 Ubuntu 24 实例上完成任务，先核对端点与 GPU 模式。"

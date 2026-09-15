@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ubuntu 20 实验环境"
+  short_description: "通过 SSH 在指定的 Ubuntu 20 容器上安全运行实验"
+  default_prompt: "$ubuntu20-experiment 在远程 Ubuntu 20 中完成这个实验，端点与凭据从本地配置读取。"

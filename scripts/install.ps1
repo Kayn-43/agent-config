@@ -44,7 +44,10 @@ param(
     # Additional skill names to skip for this run. The persistent list lives in
     # disabled.json; prefer that, because update.ps1 re-runs this script and a
     # one-off flag would be forgotten.
-    [string[]] $Exclude
+    # 额外的技能仓库根目录（例如私有仓库 ~/agent-config-private）。其 skills/ 下的技能
+    # 会一并链接到三个客户端根。默认自动探测 ~/agent-config-private。
+    [string[]] $ExtraRepo,
+    [switch] $SkipPrivate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,6 +68,16 @@ $ClaudeSkills = Join-Path $ClaudeHome 'skills'
 $ClaudeAgents = Join-Path $ClaudeHome 'agents'
 
 $SkillGroups = @('common', 'research', 'remote')
+
+# ---------------------------------------------------------------- 额外仓库
+
+# 默认自动探测私有仓库：通用知识在 public，项目知识在 private，两者都链接。
+if (-not $SkipPrivate) {
+    $defaultPrivate = Join-Path $HOME 'agent-config-private'
+    if ((Test-Path -LiteralPath $defaultPrivate) -and ($ExtraRepo -notcontains $defaultPrivate)) {
+        $ExtraRepo = @($ExtraRepo) + $defaultPrivate
+    }
+}
 
 # ---------------------------------------------------------------- disabled skills
 
@@ -214,6 +227,81 @@ function Install-AgentFiles {
     }
 }
 
+# 链接一个"额外仓库"的技能。支持两种布局：
+#   skills/<name>/              扁平
+#   skills/<group>/<name>/      分组
+function Install-ExtraRepo {
+    param([string] $Root, [string[]] $Destinations)
+
+    $skillsRoot = Join-Path $Root 'skills'
+    if (-not (Test-Path -LiteralPath $skillsRoot)) { return }
+
+    $candidates = New-Object System.Collections.ArrayList
+    foreach ($child in (Get-ChildItem -LiteralPath $skillsRoot -Directory | Sort-Object Name)) {
+        if (Test-Path -LiteralPath (Join-Path $child.FullName 'SKILL.md')) {
+            [void]$candidates.Add($child)
+        }
+        else {
+            foreach ($g in (Get-ChildItem -LiteralPath $child.FullName -Directory -ErrorAction SilentlyContinue | Sort-Object Name)) {
+                if (Test-Path -LiteralPath (Join-Path $g.FullName 'SKILL.md')) { [void]$candidates.Add($g) }
+            }
+        }
+    }
+
+    $label = Split-Path -Leaf $Root
+    Info "$label : $($candidates.Count) 个技能"
+
+    foreach ($skill in $candidates) {
+        if ($script:Disabled.ContainsKey($skill.Name)) { continue }
+        foreach ($dest in $Destinations) {
+            $link = Join-Path $dest $skill.Name
+            if (Test-Path -LiteralPath $link) { Skip "$link"; continue }
+            if ($DryRun) { Dry "将建立 junction $link -> $($skill.FullName)"; continue }
+            $lp = @{ ItemType = 'Junction'; Path = $link; Target = $skill.FullName }
+            try {
+                New-Item @lp | Out-Null
+                Ok "junction $($skill.Name) <- $label"
+            }
+            catch {
+                Warn "junction 创建失败：$link : $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# 上游技能：规范副本在 .codex（由 skill-installer 安装），另两个根链接过去。
+# 这一步只建链接，不重装——重装由 -WithUpstream 负责。
+# 少了这一步，.claude / .zcode 会看不到上游技能（曾经的真实情况）。
+$upstreamFile = Join-Path $RepoRoot 'upstream.json'
+if (Test-Path -LiteralPath $upstreamFile -PathType Leaf) {
+    $upstreamNames = @(
+        (Get-Content -LiteralPath $upstreamFile -Raw -Encoding utf8 | ConvertFrom-Json).skills |
+            ForEach-Object { $_.name }
+    )
+
+    Write-Head '上游技能 -> 另两个客户端根'
+    foreach ($name in $upstreamNames) {
+        $canonical = Join-Path $CodexSkills $name
+        if (-not (Test-Path -LiteralPath $canonical -PathType Container)) {
+            Warn "$name : 规范副本不在 $CodexSkills —— 跳过（用 -WithUpstream 安装）"
+            continue
+        }
+        foreach ($otherRoot in @($ZcodeSkills, $ClaudeSkills)) {
+            $link = Join-Path $otherRoot $name
+            if (Test-Path -LiteralPath $link) { Skip "$link"; continue }
+            if ($DryRun) { Dry "将建立 junction $link -> $canonical"; continue }
+            $lp = @{ ItemType = 'Junction'; Path = $link; Target = $canonical }
+            try {
+                New-Item @lp | Out-Null
+                Ok "junction $name <- .codex"
+            }
+            catch {
+                Warn "junction 创建失败：$link : $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
 # ---------------------------------------------------------------- prune
 
 function Remove-DanglingLinks {
@@ -272,6 +360,18 @@ foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($Zco
 Write-Head '技能 -> Claude'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($ClaudeSkills) -RepoPath $RepoRoot }
 
+if ($ExtraRepo) {
+    foreach ($r in $ExtraRepo) {
+        if (Test-Path -LiteralPath $r) {
+            Write-Head "额外仓库 -> 三个客户端根 : $r"
+            Install-ExtraRepo -Root $r -Destinations @($CodexSkills, $ZcodeSkills, $ClaudeSkills)
+        }
+        else {
+            Warn "额外仓库不存在，跳过：$r"
+        }
+    }
+}
+
 Write-Head '子 agent'
 Install-AgentFiles -RepoPath $RepoRoot -Destination $CodexAgents
 Install-AgentFiles -RepoPath $RepoRoot -Destination $ZcodeAgents
@@ -289,6 +389,17 @@ Remove-DanglingLinks -Destination $ClaudeSkills -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $CodexAgents  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ZcodeAgents  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ClaudeAgents -RepoPath $RepoRoot
+
+# 额外仓库的悬空链接单独清理（它们的链接指向另一个仓库根）。
+if ($ExtraRepo) {
+    foreach ($r in $ExtraRepo) {
+        $extraSkills = Join-Path $r 'skills'
+        if (-not (Test-Path -LiteralPath $extraSkills)) { continue }
+        Remove-DanglingLinks -Destination $CodexSkills  -RepoPath $extraSkills
+        Remove-DanglingLinks -Destination $ZcodeSkills  -RepoPath $extraSkills
+        Remove-DanglingLinks -Destination $ClaudeSkills -RepoPath $extraSkills
+    }
+}
 
 # ---------------------------------------------------------------- upstream
 
