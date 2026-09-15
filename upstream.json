@@ -1,0 +1,23 @@
+{
+  "note": "Provenance for third-party skills. Content is intentionally NOT vendored into this repo: copying propagates version drift, so these are reinstalled from source by scripts/install.ps1 -WithUpstream. Record repo/ref/path only.",
+  "skills": [
+    {
+      "name": "powershell-safe-invocation",
+      "repo": "Misaka-Mikoto-Tech/agent-skills",
+      "ref": "main",
+      "path": "skills/powershell-safe-invocation",
+      "license": "MIT",
+      "license_note": "MIT — redistribution permitted with attribution.",
+      "why_reinstall": "A local copy sat one commit behind upstream for two weeks (installed 2026-08-15; upstream fixed it 2026-08-28) precisely because it had been copied rather than installed."
+    },
+    {
+      "name": "academic-research-suite",
+      "repo": "Imbad0202/academic-research-skills-codex",
+      "ref": "main",
+      "path": "skills/academic-research-suite",
+      "license": "CC-BY-NC-4.0",
+      "license_note": "Attribution-NonCommercial 4.0. NOT open source: commercial use is prohibited. Use this Codex-native repo, not the Claude-Code sibling Imbad0202/academic-research-skills (same license).",
+      "why_reinstall": "Large (2371 files, ~35 MB) and actively developed; vendoring it would both bloat this repo and freeze a stale snapshot."
+    }
+  ]
+}

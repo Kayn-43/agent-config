@@ -1,0 +1,12 @@
+# Normalize line endings so the repo is consistent across machines and git stops
+# warning about LF -> CRLF conversion on every add.
+#
+# LF everywhere is deliberate: Windows PowerShell 5.1 reads LF-only .ps1 files
+# correctly (verified), so there is no need to carry CRLF in the repository.
+* text=auto eol=lf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.zip binary
+*.ico binary

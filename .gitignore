@@ -1,0 +1,18 @@
+# ---- Local, machine-specific configuration (never commit) --------------------
+# NOTE: `local/*` rather than `local/`. Excluding the whole directory stops git
+# from descending into it, which makes the `!` negation below silently useless —
+# the example file would never be committed.
+local/*
+!local/hosts.example.yaml
+
+# ---- Editor / OS noise ------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+
+# ---- Agent runtime state that must never be tracked -------------------------
+*.log
+.cache/
+tmp/
