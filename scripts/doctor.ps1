@@ -147,6 +147,65 @@ else {
     Add-Problem 'one of the rule files is missing'
 }
 
+# ---------------------------------------------------------------- freshness
+
+Write-Head 'Linked content freshness'
+
+# Hard links break SILENTLY when an editor replaces the repo file: the repo gets a
+# new inode, every existing link keeps pointing at the old one, and the home copy
+# serves stale content while still reporting LinkType=HardLink. Link type therefore
+# proves nothing here — compare content.
+$pairs = @(
+    @{ Home = (Join-Path $CodexHome  'AGENTS.md'); Source = (Join-Path $RepoRoot 'rules\AGENTS.md') },
+    @{ Home = (Join-Path $ZcodeHome  'AGENTS.md'); Source = (Join-Path $RepoRoot 'rules\AGENTS.md') },
+    @{ Home = (Join-Path $ClaudeHome 'CLAUDE.md'); Source = (Join-Path $RepoRoot 'rules\CLAUDE.md') }
+)
+
+foreach ($d in @(
+    @{ Dir = (Join-Path $CodexHome  'agents'); Src = (Join-Path $RepoRoot 'agents') },
+    @{ Dir = (Join-Path $ZcodeHome  'agents'); Src = (Join-Path $RepoRoot 'agents') },
+    @{ Dir = (Join-Path $ClaudeHome 'agents'); Src = (Join-Path $RepoRoot 'agents') }
+)) {
+    if (-not (Test-Path -LiteralPath $d.Dir)) { continue }
+    foreach ($f in (Get-ChildItem -LiteralPath $d.Dir -File -Force -ErrorAction SilentlyContinue)) {
+        $pairs += @{ Home = $f.FullName; Source = (Join-Path $d.Src $f.Name) }
+    }
+}
+
+$staleLinks = 0
+$localVariants = 0
+foreach ($p in $pairs) {
+    if (-not (Test-Path -LiteralPath $p.Home   -PathType Leaf)) { continue }
+    if (-not (Test-Path -LiteralPath $p.Source -PathType Leaf)) { continue }
+
+    $homeHash = (Get-FileHash -LiteralPath $p.Home   -Algorithm SHA256).Hash
+    $repoHash = (Get-FileHash -LiteralPath $p.Source -Algorithm SHA256).Hash
+    if ($homeHash -eq $repoHash) { continue }
+
+    $item = Get-Item -LiteralPath $p.Home -Force
+    if ($item.LinkType) {
+        $staleLinks++
+        Write-Host "  [STALE] $($p.Home)" -ForegroundColor Red
+        Write-Host "          is a $($item.LinkType) but its content differs from the repo copy"
+        Add-Problem "stale $($item.LinkType): $($p.Home) does not match $($p.Source)"
+    }
+    else {
+        $localVariants++
+        Write-Host "  [local] $($p.Home)" -ForegroundColor DarkGray
+        Write-Host '          real file, differs from the repo copy — expected for a local variant'
+    }
+}
+
+if ($staleLinks -eq 0 -and $localVariants -eq 0) {
+    Write-Host '  [OK]   every rule/agent file matches its repo source' -ForegroundColor Green
+}
+if ($staleLinks -gt 0) {
+    Write-Host ''
+    Write-Host '  Stale links serve outdated content. Fix: delete the home copy, then re-run' -ForegroundColor Yellow
+    Write-Host '  scripts\install.ps1 to re-link. (Reproducing a real agent-config case: two' -ForegroundColor Yellow
+    Write-Host '  rule files were translated, and the existing hard links kept the old text.)' -ForegroundColor Yellow
+}
+
 # ---------------------------------------------------------------- repo state
 
 Write-Head 'Repository state'

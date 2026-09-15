@@ -133,6 +133,11 @@ copying it, so one edit propagates everywhere and nothing drifts.
 - **Directories → directory junctions** (`New-Item -ItemType Junction`). Junctions
   need no elevation.
 - **Files → hard links, falling back to copy.** Hard links need no elevation either.
+  Caveat: a hard link is bound to an *inode*, so if an editor rewrites the repo file
+  the repo gets a new inode and every existing link keeps serving the old content —
+  and it still reports `LinkType=HardLink`, so the link type proves nothing.
+  **`doctor.ps1` compares content, not link type**, and flags such stale links.
+  Fix by deleting the home copy and re-running `install.ps1`.
 - **Never `New-Item -ItemType SymbolicLink` as the primary strategy** — it fails
   with "requires administrator privileges" unless Developer Mode is on, and it is
   not on by default.

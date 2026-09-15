@@ -1,70 +1,55 @@
-# Global agent rules (canonical)
+# 全局 agent 规则（规范版）
 
-Applies to every agent session on this machine, regardless of client.
+适用于本机所有 agent 会话，与具体客户端无关。
 
-Keep this file byte-identical to its sibling in this directory. The two clients
-read different filenames, so the content is duplicated on purpose — and
-`doctor.ps1` fails the check the moment the two copies drift apart.
+保持本文件与本目录下的姊妹文件**逐字节相同**。两个客户端读取的文件名不同，所以内容是有意重复的——一旦两份出现分叉，`doctor.ps1` 就会报错。
 
-## 1. Destructive operations on remote hosts
+## 1. 远程主机上的破坏性操作
 
-Before any `rm -rf`, `find -delete`, `rsync --delete`, `docker prune`, cache
-cleanup, bulk move, or `>` onto an existing file:
+在执行任何 `rm -rf`、`find -delete`、`rsync --delete`、`docker prune`、缓存清理、批量移动，或用 `>` 覆盖已有文件之前：
 
-1. Expand every variable and **print the resolved paths first**.
-2. Refuse empty strings, unset variables, and `${VAR}` that resolved to nothing.
-3. Refuse `/`, `/root`, `$HOME`, `/etc`, `/usr`, `/var`, and any filesystem root.
-4. Verify the target is **inside** the intended root — `C:\WorkBackup` is not
-   inside `C:\Work`; string-prefix checks alone are insufficient.
-5. Run a dry run (`rm -v --dry-run`, `rsync -n`, `find -print` instead of `-delete`).
-6. Report the file count and total size that would be affected.
-7. Only then execute, and report what was actually removed.
+1. 展开每一个变量，并**先打印解析后的路径**。
+2. 拒绝空字符串、未设置的变量，以及解析结果为空值的 `${VAR}`。
+3. 拒绝 `/`、`/root`、`$HOME`、`/etc`、`/usr`、`/var` 以及任何文件系统根目录。
+4. 校验目标确实位于预期根目录**之内**——`C:\WorkBackup` 并不在 `C:\Work` 之内；仅靠字符串前缀比较是不够的。
+5. 先执行干跑（`rm -v --dry-run`、`rsync -n`、或用 `find -print` 代替 `-delete`）。
+6. 报告将受影响的文件数量与总大小。
+7. 之后才执行，并报告**实际**删除的内容。
 
-If any step cannot be completed, stop and report rather than proceeding.
+任一步骤无法完成时，停下来报告，不要继续执行。
 
-## 2. Remote work discipline
+## 2. 远程工作纪律
 
-- Treat the remote host as the execution environment. Do not accidentally run
-  remote-intended commands on the local machine, or vice versa.
-- Inspect existing remote state **before** modifying it. Preserve unrelated work.
-- Never delete, overwrite, stop services, or replace environments unless the
-  request clearly requires it.
-- Long-running jobs must report PID, log path, and current status — "started" is
-  not a status.
-- Report the exact commands and paths used, so the user can reproduce them.
-- Never request, display, or upload private key contents.
+- 把远程主机当作执行环境。不要误把本应远程执行的命令跑在本地，反之亦然。
+- 修改远程现状**之前**先看清它。保留与本次任务无关的工作成果。
+- 除非请求明确要求，否则不要删除、覆盖、停止服务或替换环境。
+- 长时间运行的任务必须报告 PID、日志路径和当前状态——「已启动」不算状态。
+- 报告实际使用的命令和路径，使用户能够复现。
+- 绝不索取、展示或上传私钥内容。
 
-## 3. Environment sanity before trusting results
+## 3. 在采信结果之前先确认环境真实
 
-- **Exit code 0 does not mean success.** Windows Store `python`/`python3` stubs
-  print "Python was not found" and exit 0. Verify by inspecting *output*.
-- A binary that exists is not necessarily functional (a 0-byte `nvidia-smi` file
-  exits 0 and prints nothing).
-- Quoting/escaping bugs can silently truncate a command while still returning
-  success. On Windows prefer argument arrays over constructed command strings.
-- Verify host identity before trusting cached facts:
-  `hostname` and `grep PRETTY_NAME /etc/os-release`.
+- **退出码 0 不代表成功。** Windows 商店版 `python`/`python3` 是重定向桩，会打印「Python was not found」，而**退出码仍是 0**。要通过检查*输出*来验证。
+- 文件存在不代表它可用：一个 0 字节的 `nvidia-smi` 会退出 0，并且什么都不打印。
+- 引号/转义错误可能**静默截断**命令，却依然返回成功。在 Windows 上优先使用参数数组，而不是拼接命令字符串。
+- 采信任何缓存印象之前，先核实主机身份：`hostname` 与 `grep PRETTY_NAME /etc/os-release`。
 
-## 4. Verification
+## 4. 验证
 
-- Prefer: run it, inspect the output, then state the result. Not: assume it worked.
-- When reporting success, say what was actually verified and what was not.
-- State limitations explicitly. "Tested in dry-run" is not "tested".
-- Report failures with the actual output, not a paraphrase.
+- 优先做法：跑一遍、看输出、再陈述结果。而不是：假定它成功了。
+- 报告成功时，说清**实际**验证了什么、没验证什么。
+- 明确说明局限。「在干跑中测试过」不等于「测试过」。
+- 报告失败要带上真实输出，而不是转述。
 
-## 5. Communication
+## 5. 沟通
 
-- Lead with the outcome; supporting detail after.
-- Distinguish **verified**, **inferred**, and **not checked**.
-- Correct earlier statements plainly when new evidence contradicts them.
-- Do not present a plan as if it were completed work.
+- 先给结论，支撑细节放在后面。
+- 区分**已核实**、**推断**和**未检查**。
+- 新证据与先前说法矛盾时，直接更正，不要含糊过去。
+- 不要把计划当成已完成的工作来陈述。
 
-## 6. Source and license discipline
+## 6. 来源与许可证纪律
 
-- Do not copy third-party skill content into local repositories. Record
-  provenance (`repo`/`ref`/`path`) and reinstall from source instead — copying
-  propagates version drift.
-- Check a project's license before redistributing. Non-commercial licenses
-  (e.g. CC BY-NC) prohibit commercial use; some prohibit redistribution entirely.
-- Never commit machine-specific values (hosts, ports, keys, fingerprints, model
-  bindings) into a shared repository.
+- 不要把第三方技能内容拷贝进本地仓库。记录来源（`repo`/`ref`/`path`）并从源头重装——拷贝会把版本陈旧一并带走。
+- 再分发之前先查项目许可证。非商业许可（如 CC BY-NC）禁止商业使用，有些甚至完全禁止再分发。
+- 绝不把机器相关的值（主机、端口、密钥、指纹、模型绑定）提交进共享仓库。
