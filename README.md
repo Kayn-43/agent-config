@@ -41,6 +41,23 @@ Codex  ZCode Claude Code
 `install.ps1` links the repo's skills into all three roots directly, so every
 client reads the same single physical copy.
 
+### Disabling a skill
+
+Add it to `disabled.json`:
+
+```json
+{ "name": "some-skill", "reason": "why, and when to re-enable" }
+```
+
+`install.ps1` reads this on every run, so the choice survives `update.ps1` — a
+one-off `-Exclude` flag would be forgotten the next time update ran. The skill
+stays in the repo; it just is not linked. Remove the entry and re-run to enable
+it again.
+
+This matters because a repo skill can overlap an older skill that is still in
+use. `ubuntu` is disabled by default here for exactly that reason: it supersedes
+`ubuntu20-experiment` / `ubuntu24-experiment` only once those are retired.
+
 Consequence: **swapping a Linux server requires no skill reinstall.** Only the
 host entry changes.
 

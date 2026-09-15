@@ -1,0 +1,11 @@
+{
+  "note": "Skills that are deliberately NOT installed, even though they exist in this repo. Checked by scripts/install.ps1 on every run, so the choice survives update.ps1. Remove an entry to re-enable it, then re-run install.ps1.",
+  "skills": [
+    {
+      "name": "ubuntu",
+      "disabled_on": "2026-09-15",
+      "reason": "Overlaps the pre-existing machine-oriented skills ubuntu20-experiment and ubuntu24-experiment, which are still in use. This capability-oriented 'ubuntu' skill supersedes them only once those are retired. Re-enable after removing the old ones.",
+      "owner": "kayn"
+    }
+  ]
+}

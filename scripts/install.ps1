@@ -37,7 +37,12 @@
 param(
     [switch] $DryRun,
     [switch] $WithUpstream,
-    [string] $Proxy
+    [string] $Proxy,
+
+    # Additional skill names to skip for this run. The persistent list lives in
+    # disabled.json; prefer that, because update.ps1 re-runs this script and a
+    # one-off flag would be forgotten.
+    [string[]] $Exclude
 )
 
 $ErrorActionPreference = 'Stop'
@@ -59,6 +64,33 @@ $ClaudeAgents = Join-Path $ClaudeHome 'agents'
 
 $SkillGroups = @('common', 'research', 'remote')
 
+# ---------------------------------------------------------------- disabled skills
+
+# Skills that exist in the repo but must not be linked on this machine.
+# Read from disabled.json on every run so the choice survives update.ps1.
+$script:Disabled = @{}
+$script:DisabledReason = @{}
+
+$disabledFile = Join-Path $RepoRoot 'disabled.json'
+if (Test-Path -LiteralPath $disabledFile -PathType Leaf) {
+    try {
+        $disabledDoc = Get-Content -LiteralPath $disabledFile -Raw -Encoding utf8 | ConvertFrom-Json
+        foreach ($d in $disabledDoc.skills) {
+            $script:Disabled[$d.name] = $true
+            $script:DisabledReason[$d.name] = $d.reason
+        }
+    }
+    catch {
+        Warn "could not parse disabled.json : $($_.Exception.Message)"
+    }
+}
+if ($Exclude) {
+    foreach ($n in $Exclude) {
+        $script:Disabled[$n] = $true
+        $script:DisabledReason[$n] = 'excluded via -Exclude (this run only)'
+    }
+}
+
 # ---------------------------------------------------------------- helpers
 
 function Write-Head { param([string] $Text) Write-Host ''; Write-Host ('=' * 62); Write-Host $Text; Write-Host ('=' * 62) }
@@ -68,6 +100,7 @@ function Skip { param([string] $Text) Write-Host "  [skip]  $Text" -ForegroundCo
 function Warn { param([string] $Text) Write-Host "  [warn]  $Text" -ForegroundColor Yellow }
 function Prune{ param([string] $Text) Write-Host "  [prune] $Text" -ForegroundColor Magenta }
 function Dry  { param([string] $Text) Write-Host "  [dry]   $Text" -ForegroundColor Cyan }
+function Off  { param([string] $Text) Write-Host "  [off]   $Text" -ForegroundColor DarkYellow }
 
 function Ensure-Directory {
     param([string] $Path)
@@ -101,6 +134,7 @@ function Install-SkillGroup {
     Info "$Group/ : $($skills.Count) skills"
 
     foreach ($skill in $skills) {
+        if ($script:Disabled.ContainsKey($skill.Name)) { continue }
         foreach ($dest in $Destinations) {
             $link = Join-Path $dest $skill.Name
 
@@ -216,6 +250,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'skills'))) {
 Write-Head 'Directories'
 foreach ($d in @($CodexHome, $CodexSkills, $CodexAgents, $ZcodeHome, $ZcodeSkills, $ZcodeAgents, $ClaudeHome, $ClaudeSkills, $ClaudeAgents)) {
     Ensure-Directory -Path $d
+}
+
+if ($script:Disabled.Count -gt 0) {
+    Write-Head 'Disabled skills (in the repo, deliberately not linked)'
+    foreach ($n in ($script:Disabled.Keys | Sort-Object)) {
+        Off "$n"
+        Info "      $($script:DisabledReason[$n])"
+    }
+    Info 'Edit disabled.json and re-run to enable.'
 }
 
 Write-Head 'Skills -> Codex'
