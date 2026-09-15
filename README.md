@@ -14,12 +14,12 @@ GitHub (this repo)
         ▼
 Windows  agent-config          ← the only source of truth
         │
-   ┌────┴────┐
-   ▼         ▼
-ZCode      Claude Code
-~/.zcode/  ~/.claude/
-   │         │
-   └────┬────┘
+   ┌────┼─────┐
+   ▼    ▼     ▼
+Codex  ZCode Claude Code
+~/.codex/  ~/.zcode/  ~/.claude/
+   │    │     │
+   └────┼─────┘
         ▼
        SSH
         │
@@ -27,6 +27,19 @@ ZCode      Claude Code
    ▼    ▼    ▼
  u20   u24  gpu…
 ```
+
+### Install targets
+
+| Client | Skills | Agents | Rules |
+|---|---|---|---|
+| Codex | `~/.codex/skills` | `~/.codex/agents` | `~/.codex/AGENTS.md` |
+| ZCode | `~/.zcode/skills` | `~/.zcode/agents` | `~/.zcode/AGENTS.md` |
+| Claude Code | `~/.claude/skills` | `~/.claude/agents` | `~/.claude/CLAUDE.md` |
+
+**`~/.codex/skills` is the canonical root**, not `~/.zcode/skills`. That is where
+`skill-installer` installs by default and where upstream skills already live.
+`install.ps1` links the repo's skills into all three roots directly, so every
+client reads the same single physical copy.
 
 Consequence: **swapping a Linux server requires no skill reinstall.** Only the
 host entry changes.
@@ -97,7 +110,7 @@ otherwise linger forever and make the skill list lie about what is available.
 
 ## How installation works, and why not symlinks
 
-`install.ps1` links repo content into `~/.zcode/` and `~/.claude/` rather than
+`install.ps1` links repo content into the three client homes above rather than
 copying it, so one edit propagates everywhere and nothing drifts.
 
 - **Directories → directory junctions** (`New-Item -ItemType Junction`). Junctions

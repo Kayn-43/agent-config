@@ -22,6 +22,7 @@ param(
 $ErrorActionPreference = 'Continue'
 
 $RepoRoot   = Split-Path -Parent $PSScriptRoot
+$CodexHome  = Join-Path $HOME '.codex'
 $ZcodeHome  = Join-Path $HOME '.zcode'
 $ClaudeHome = Join-Path $HOME '.claude'
 
@@ -37,12 +38,16 @@ Write-Head 'Paths'
 $checks = @(
     @{ Name = 'repo root'          ; Path = $RepoRoot },
     @{ Name = 'repo skills'        ; Path = (Join-Path $RepoRoot 'skills') },
+    @{ Name = 'codex home'         ; Path = $CodexHome },
+    @{ Name = 'codex skills'       ; Path = (Join-Path $CodexHome 'skills') },
+    @{ Name = 'codex agents'       ; Path = (Join-Path $CodexHome 'agents') },
     @{ Name = 'zcode home'         ; Path = $ZcodeHome },
     @{ Name = 'zcode skills'       ; Path = (Join-Path $ZcodeHome 'skills') },
     @{ Name = 'zcode agents'       ; Path = (Join-Path $ZcodeHome 'agents') },
     @{ Name = 'claude home'        ; Path = $ClaudeHome },
     @{ Name = 'claude skills'      ; Path = (Join-Path $ClaudeHome 'skills') },
     @{ Name = 'claude agents'      ; Path = (Join-Path $ClaudeHome 'agents') },
+    @{ Name = 'codex AGENTS.md'    ; Path = (Join-Path $CodexHome 'AGENTS.md') },
     @{ Name = 'zcode AGENTS.md'    ; Path = (Join-Path $ZcodeHome 'AGENTS.md') },
     @{ Name = 'claude CLAUDE.md'   ; Path = (Join-Path $ClaudeHome 'CLAUDE.md') },
     @{ Name = 'local/hosts.yaml'   ; Path = (Join-Path $RepoRoot 'local\hosts.yaml') }
@@ -110,6 +115,8 @@ function Show-Links {
     }
 }
 
+Show-Links -Title 'Codex skills'  -Path (Join-Path $CodexHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
+Show-Links -Title 'Codex agents'  -Path (Join-Path $CodexHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
 Show-Links -Title 'ZCode skills'  -Path (Join-Path $ZcodeHome  'skills') -RepoPath (Join-Path $RepoRoot 'skills')
 Show-Links -Title 'ZCode agents'  -Path (Join-Path $ZcodeHome  'agents') -RepoPath (Join-Path $RepoRoot 'agents')
 Show-Links -Title 'Claude skills' -Path (Join-Path $ClaudeHome 'skills') -RepoPath (Join-Path $RepoRoot 'skills')

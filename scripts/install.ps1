@@ -46,9 +46,12 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
+$CodexHome  = Join-Path $HOME '.codex'
 $ZcodeHome  = Join-Path $HOME '.zcode'
 $ClaudeHome = Join-Path $HOME '.claude'
 
+$CodexSkills  = Join-Path $CodexHome  'skills'
+$CodexAgents  = Join-Path $CodexHome  'agents'
 $ZcodeSkills  = Join-Path $ZcodeHome  'skills'
 $ZcodeAgents  = Join-Path $ZcodeHome  'agents'
 $ClaudeSkills = Join-Path $ClaudeHome 'skills'
@@ -201,6 +204,7 @@ function Remove-DanglingLinks {
 
 Write-Head 'agent-config installer'
 Info "repo       : $RepoRoot"
+Info "codex home : $CodexHome"
 Info "zcode home : $ZcodeHome"
 Info "claude home: $ClaudeHome"
 Info "dry run    : $($DryRun.IsPresent)"
@@ -210,9 +214,12 @@ if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot 'skills'))) {
 }
 
 Write-Head 'Directories'
-foreach ($d in @($ZcodeHome, $ZcodeSkills, $ZcodeAgents, $ClaudeHome, $ClaudeSkills, $ClaudeAgents)) {
+foreach ($d in @($CodexHome, $CodexSkills, $CodexAgents, $ZcodeHome, $ZcodeSkills, $ZcodeAgents, $ClaudeHome, $ClaudeSkills, $ClaudeAgents)) {
     Ensure-Directory -Path $d
 }
+
+Write-Head 'Skills -> Codex'
+foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($CodexSkills) -RepoPath $RepoRoot }
 
 Write-Head 'Skills -> ZCode'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($ZcodeSkills) -RepoPath $RepoRoot }
@@ -221,16 +228,20 @@ Write-Head 'Skills -> Claude'
 foreach ($g in $SkillGroups) { Install-SkillGroup -Group $g -Destinations @($ClaudeSkills) -RepoPath $RepoRoot }
 
 Write-Head 'Agents'
+Install-AgentFiles -RepoPath $RepoRoot -Destination $CodexAgents
 Install-AgentFiles -RepoPath $RepoRoot -Destination $ZcodeAgents
 Install-AgentFiles -RepoPath $RepoRoot -Destination $ClaudeAgents
 
 Write-Head 'Rules'
-Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $ZcodeHome 'AGENTS.md')
+Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $CodexHome  'AGENTS.md')
+Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $ZcodeHome  'AGENTS.md')
 Install-FileLink -Source (Join-Path $RepoRoot 'rules\CLAUDE.md') -Destination (Join-Path $ClaudeHome 'CLAUDE.md')
 
 Write-Head 'Pruning dangling links'
+Remove-DanglingLinks -Destination $CodexSkills  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ZcodeSkills  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ClaudeSkills -RepoPath $RepoRoot
+Remove-DanglingLinks -Destination $CodexAgents  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ZcodeAgents  -RepoPath $RepoRoot
 Remove-DanglingLinks -Destination $ClaudeAgents -RepoPath $RepoRoot
 
@@ -247,11 +258,12 @@ if ($WithUpstream) {
         $entries = (Get-Content -LiteralPath $upstreamFile -Raw -Encoding utf8 | ConvertFrom-Json).skills
 
         # Locate skill-installer's helper, which lives in the client's own skill tree.
-        $installer = Join-Path $ZcodeSkills '.system\skill-installer\scripts\install-skill-from-github.py'
-        if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
-            $installer = Join-Path $ClaudeSkills '.system\skill-installer\scripts\install-skill-from-github.py'
+        $installer = $null
+        foreach ($root in @($CodexSkills, $ZcodeSkills, $ClaudeSkills)) {
+            $candidate = Join-Path $root '.system\skill-installer\scripts\install-skill-from-github.py'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { $installer = $candidate; break }
         }
-        if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
+        if (-not $installer) {
             Warn "skill-installer helper not found; install the .system skills first, then re-run."
         }
         else {
@@ -275,8 +287,14 @@ if ($WithUpstream) {
             }
             else {
                 Info "python: $python"
+                # Upstream skills install into the CANONICAL root ($CodexSkills), which is
+                # where skill-installer defaults and where existing upstream skills already
+                # live. The other client roots then get junctions to it, matching how this
+                # machine is already laid out — never a second physical copy.
+                Info "canonical root: $CodexSkills"
+
                 foreach ($e in $entries) {
-                    $dest = Join-Path $ZcodeSkills $e.name
+                    $dest = Join-Path $CodexSkills $e.name
                     Info "--- $($e.name)  ($($e.repo)@$($e.ref), license $($e.license))"
                     if ($e.license -like 'CC-BY-NC*') {
                         Warn "non-commercial license: $($e.license_note)"
@@ -292,14 +310,31 @@ if ($WithUpstream) {
                         '--repo', $e.repo
                         '--ref',  $e.ref
                         '--path', $e.path
-                        '--dest', $ZcodeSkills
+                        '--dest', $CodexSkills
                         '--method', 'git'
                     )
                     if ($Proxy) { $env:HTTPS_PROXY = $Proxy; $env:HTTP_PROXY = $Proxy }
                     & $python @argList
                     $exit = $LASTEXITCODE
-                    if ($exit -ne 0) { Warn "installer failed for $($e.name) (exit $exit)" }
-                    else { Ok "installed $($e.name)" }
+                    if ($exit -ne 0) {
+                        Warn "installer failed for $($e.name) (exit $exit)"
+                        continue
+                    }
+                    Ok "installed $($e.name) -> $CodexSkills"
+
+                    foreach ($otherRoot in @($ZcodeSkills, $ClaudeSkills)) {
+                        $otherLink = Join-Path $otherRoot $e.name
+                        if (Test-Path -LiteralPath $otherLink) { Skip "$otherLink"; continue }
+                        if ($DryRun) { Dry "junction $otherLink -> $dest"; continue }
+                        $lp = @{ ItemType = 'Junction'; Path = $otherLink; Target = $dest }
+                        try {
+                            New-Item @lp | Out-Null
+                            Ok "junction $($e.name) -> $(Split-Path -Leaf $otherRoot)"
+                        }
+                        catch {
+                            Warn "junction failed for $otherLink : $($_.Exception.Message)"
+                        }
+                    }
                 }
             }
         }
