@@ -117,6 +117,15 @@ function Prune{ param([string] $Text) Write-Host "  [prune] $Text" -ForegroundCo
 function Dry  { param([string] $Text) Write-Host "  [dry]   $Text" -ForegroundColor Cyan }
 function Off  { param([string] $Text) Write-Host "  [off]   $Text" -ForegroundColor DarkYellow }
 
+# 按 UTF-8 **无 BOM** 读写文本。Windows PowerShell 5.1 的 `-Encoding utf8` 会写 BOM，
+# 而 agent/skill 文件的 frontmatter 对 BOM 敏感，所以直接用 .NET API。
+$script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Write-TextFile {
+    param([string] $Path, [string] $Text)
+    [System.IO.File]::WriteAllText($Path, $Text, $script:Utf8NoBom)
+}
+
 function Ensure-Directory {
     param([string] $Path)
     if (Test-Path -LiteralPath $Path) { return }
@@ -183,6 +192,53 @@ function Install-SkillGroup {
     }
 }
 
+# ---------------------------------------------------------------- agent 模型绑定
+
+# ~/.agent-local/agent-models.json 里的模型绑定（机器相关，永不入 Git）。
+# 有绑定的 agent **不能用硬链接**：硬链接操作的是同一个 inode，改写客户端那份等于
+# 改写 Git 仓库里的定义，绑定就会混进版本控制。因此这类 agent 生成
+# "仓库定义 + 注入一行 model:" 的副本，每次运行都重新生成，所以不会漂移。
+$script:AgentModels = @{}
+$agentModelsFile = Join-Path $HOME '.agent-local\agent-models.json'
+if (Test-Path -LiteralPath $agentModelsFile -PathType Leaf) {
+    try {
+        $doc = Get-Content -LiteralPath $agentModelsFile -Raw -Encoding utf8 | ConvertFrom-Json
+        if ($doc.agents) {
+            foreach ($p in $doc.agents.PSObject.Properties) { $script:AgentModels[$p.Name] = $p.Value }
+        }
+    }
+    catch {
+        Warn "无法解析 agent-models.json : $($_.Exception.Message)"
+    }
+}
+
+function New-AgentWithModel {
+    param([string] $Source, [string] $Destination, [string] $Model)
+
+    $lines = [System.IO.File]::ReadAllLines($Source, [System.Text.Encoding]::UTF8)
+    if ($lines.Count -lt 3 -or $lines[0].Trim() -ne '---') {
+        throw "agent 文件缺少 frontmatter：$Source"
+    }
+
+    $out = New-Object System.Collections.ArrayList
+    [void]$out.Add($lines[0])
+    $closed = $false
+    for ($i = 1; $i -lt $lines.Count; $i++) {
+        if (-not $closed -and $lines[$i].Trim() -eq '---') {
+            [void]$out.Add('model: "' + $Model + '"')
+            [void]$out.Add($lines[$i])
+            $closed = $true
+            continue
+        }
+        [void]$out.Add($lines[$i])
+    }
+    if (-not $closed) { throw "agent 文件 frontmatter 未闭合：$Source" }
+
+    # 必须先删除目标再写：若目标当前是硬链接，直接写会穿透链接改掉仓库源文件。
+    if (Test-Path -LiteralPath $Destination) { Remove-Item -LiteralPath $Destination -Force }
+    Write-TextFile -Path $Destination -Text (($out -join "`n") + "`n")
+}
+
 # ---------------------------------------------------------------- file links
 
 function Install-FileLink {
@@ -223,7 +279,23 @@ function Install-AgentFiles {
     if (-not (Test-Path -LiteralPath $agentDir)) { return }
 
     foreach ($agent in (Get-ChildItem -LiteralPath $agentDir -Filter '*.md' | Sort-Object Name)) {
-        Install-FileLink -Source $agent.FullName -Destination (Join-Path $Destination $agent.Name)
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($agent.Name)
+        $dest = Join-Path $Destination $agent.Name
+
+        if ($script:AgentModels.ContainsKey($name)) {
+            # 派生文件，每次重新生成；不做"已存在就跳过"的保护。
+            if ($DryRun) { Dry "将生成（注入 model）$dest"; continue }
+            try {
+                New-AgentWithModel -Source $agent.FullName -Destination $dest -Model $script:AgentModels[$name]
+                Ok "生成 $($agent.Name)（已注入 model）"
+            }
+            catch {
+                Warn "生成失败：$dest : $($_.Exception.Message)"
+            }
+            continue
+        }
+
+        Install-FileLink -Source $agent.FullName -Destination $dest
     }
 }
 

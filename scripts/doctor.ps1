@@ -340,6 +340,90 @@ foreach ($c in $consumerRoots) {
     }
 }
 
+# --- agents：定义在仓库，绑定在本机，两者不得混淆 -----------------------------
+$agentRepoDir = Join-Path $RepoRoot 'agents'
+
+if (Test-Path -LiteralPath $agentRepoDir) {
+
+    # 1) 仓库里的 agent 定义不得含 model: —— 绑定属于本机配置
+    foreach ($f in (Get-ChildItem -LiteralPath $agentRepoDir -Filter '*.md')) {
+        $text = [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8)
+        if ($text -match '(?m)^model\s*:') {
+            Add-Fail "FAIL: model binding committed in repo -> agents/$($f.Name)"
+        }
+    }
+
+    # 2) 客户端的 agent 文件必须与仓库定义一致，允许且仅允许多一行注入的 model:
+    foreach ($h in @($CodexHome, $ZcodeHome, $ClaudeHome)) {
+        $adir = Join-Path $h 'agents'
+        if (-not (Test-Path -LiteralPath $adir)) { continue }
+
+        foreach ($f in (Get-ChildItem -LiteralPath $adir -Filter '*.md')) {
+            $src = Join-Path $agentRepoDir $f.Name
+            if (-not (Test-Path -LiteralPath $src -PathType Leaf)) {
+                Add-Fail "FAIL: agent file not in repo -> $($f.FullName)"
+                continue
+            }
+            if ($f.LinkType) { continue }   # 硬链接：内容必然与仓库一致
+
+            $a = (Get-Content -LiteralPath $f.FullName -Raw -Encoding utf8) -replace "`r`n", "`n"
+            $b = (Get-Content -LiteralPath $src        -Raw -Encoding utf8) -replace "`r`n", "`n"
+            $stripped = (($a -split "`n") | Where-Object { $_ -notmatch '^model\s*:' }) -join "`n"
+
+            if ($stripped -ne $b) {
+                Add-Fail "FAIL: agent file diverges from repo definition -> $($f.FullName)"
+            }
+            elseif ($a -notmatch '(?m)^model\s*:') {
+                Add-Fail "FAIL: agent file has no injected model but repo file has none either -> $($f.FullName)"
+            }
+            else {
+                Write-Host "  [ok]   $($f.FullName) : 与仓库定义一致（仅多一行 model）" -ForegroundColor Green
+            }
+        }
+    }
+}
+
+# 3) 绑定的模型必须在客户端配置里存在且启用 —— 这条能在写入前抓到拼错或失效的模型
+$modelsFile = Join-Path $AgentLocal 'agent-models.json'
+$clientCfg  = Join-Path $ZcodeHome 'v2\config.json'
+
+if ((Test-Path -LiteralPath $modelsFile -PathType Leaf) -and (Test-Path -LiteralPath $clientCfg -PathType Leaf)) {
+    try {
+        $providers = (Get-Content -LiteralPath $clientCfg -Raw -Encoding utf8 | ConvertFrom-Json).provider
+        $bindings  = (Get-Content -LiteralPath $modelsFile -Raw -Encoding utf8 | ConvertFrom-Json).agents
+
+        foreach ($p in $bindings.PSObject.Properties) {
+            $spec = [string] $p.Value
+            if ($spec -notmatch '^custom:(.+):([^:]+)$') {
+                Add-Fail "FAIL: bad model spec for $($p.Name): $spec"
+                continue
+            }
+            $provId = $Matches[1] -replace '%3[Aa]', ':'
+            $model  = $Matches[2]
+
+            $provProp = $providers.PSObject.Properties[$provId]
+            if (-not $provProp) {
+                Add-Fail "FAIL: provider not registered for $($p.Name): $provId"
+                continue
+            }
+            $prov = $provProp.Value
+            if ($prov.enabled -eq $false) {
+                $why = if ($prov.systemDisabledReason) { $prov.systemDisabledReason } else { 'disabled' }
+                Add-Fail "FAIL: provider disabled for $($p.Name): $provId ($why)"
+                continue
+            }
+            if (-not $prov.models.PSObject.Properties[$model]) {
+                Add-Fail "FAIL: model not in catalogue for $($p.Name): $provId / $model"
+                continue
+            }
+            Write-Host "  [ok]   agent $($p.Name) -> $model  ($provId)" -ForegroundColor Green
+        }
+    }
+    catch {
+        Add-Fail "FAIL: 无法校验模型绑定：$($_.Exception.Message)"
+    }
+}
+
 # --- 仓库里不得出现机器身份 / 凭据文件 ---------------------------------------
 $forbiddenRegex = '^(hosts\.yaml|hosts\..*\.yaml|askpass.*|.*\.key|.*\.pem|.*\.secret|\.env|\.env\..*)$'
 
