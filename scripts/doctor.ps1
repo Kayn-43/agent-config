@@ -345,6 +345,18 @@ $agentRepoDir = Join-Path $RepoRoot 'agents'
 
 if (Test-Path -LiteralPath $agentRepoDir) {
 
+    # 期望的绑定值（来自本机真源）。客户端副本里注入的 model 必须与它相符——
+    # 否则说明有人手改了客户端文件，或者真源与客户端副本不同步（下次 install 会覆盖）。
+    $expectedModels = @{}
+    $mf = Join-Path $AgentLocal 'agent-models.json'
+    if (Test-Path -LiteralPath $mf -PathType Leaf) {
+        try {
+            $bd = (Get-Content -LiteralPath $mf -Raw -Encoding utf8 | ConvertFrom-Json).agents
+            foreach ($p in $bd.PSObject.Properties) { $expectedModels[$p.Name] = [string] $p.Value }
+        }
+        catch { Add-Fail "FAIL: 无法解析 agent-models.json：$($_.Exception.Message)" }
+    }
+
     # 1) 仓库里的 agent 定义不得含 model: —— 绑定属于本机配置
     foreach ($f in (Get-ChildItem -LiteralPath $agentRepoDir -Filter '*.md')) {
         $text = [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8)
@@ -377,7 +389,28 @@ if (Test-Path -LiteralPath $agentRepoDir) {
                 Add-Fail "FAIL: agent file has no injected model but repo file has none either -> $($f.FullName)"
             }
             else {
-                Write-Host "  [ok]   $($f.FullName) : 与仓库定义一致（仅多一行 model）" -ForegroundColor Green
+                # 关键补充：比对注入的值与真源声明是否相符。不比对就会出现
+                # "客户端手改成可用模型、真源仍是坏模型、doctor 却全报 ok" 的情况——
+                # 而下次 install 会按真源覆盖，把可用配置打回坏的。
+                $agName = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
+                $mm = [regex]::Match($a, '(?m)^model\s*:\s*"?([^"\r\n]+)"?')
+                $actualModel = if ($mm.Success) { $mm.Groups[1].Value.Trim() } else { '' }
+
+                if ($expectedModels.ContainsKey($agName)) {
+                    $want = $expectedModels[$agName]
+                    if ($actualModel -ne $want) {
+                        Add-Fail "FAIL: injected model out of sync -> $($f.FullName)"
+                        Write-Host "         客户端实际: $actualModel" -ForegroundColor Red
+                        Write-Host "         真源声明  : $want" -ForegroundColor Red
+                        Write-Host "         修法: 跑 scripts\install.ps1 —— 注意它会以真源为准覆盖客户端" -ForegroundColor Red
+                    }
+                    else {
+                        Write-Host "  [ok]   $($f.FullName) : 定义一致，model 与真源相符" -ForegroundColor Green
+                    }
+                }
+                else {
+                    Write-Host "  [warn] $($f.FullName) : 有 model 行但真源未声明该 agent" -ForegroundColor Yellow
+                }
             }
         }
     }

@@ -72,10 +72,16 @@ $SkillGroups = @('common', 'research', 'remote')
 # ---------------------------------------------------------------- 额外仓库
 
 # 默认自动探测私有仓库：通用知识在 public，项目知识在 private，两者都链接。
+# 未传 -ExtraRepo 时它的值是 $null，而 `@($null) + $x` 会产生一个**首元素为 null**
+# 的数组；随后 `Test-Path -LiteralPath $null` 会抛"参数为空字符串"并中断整个脚本
+# （表现：脚本在技能段之后就停了，agents/规则/清理全部没执行）。
+# 所以先净化成"只含非空字符串"的数组。
+$ExtraRepo = @(@($ExtraRepo) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
 if (-not $SkipPrivate) {
     $defaultPrivate = Join-Path $HOME 'agent-config-private'
     if ((Test-Path -LiteralPath $defaultPrivate) -and ($ExtraRepo -notcontains $defaultPrivate)) {
-        $ExtraRepo = @($ExtraRepo) + $defaultPrivate
+        $ExtraRepo += $defaultPrivate
     }
 }
 
