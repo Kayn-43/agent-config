@@ -205,12 +205,23 @@ function Install-SkillGroup {
 # 改写 Git 仓库里的定义，绑定就会混进版本控制。因此这类 agent 生成
 # "仓库定义 + 注入一行 model:" 的副本，每次运行都重新生成，所以不会漂移。
 $script:AgentModels = @{}
+$script:ClaudeAgentModels = @{}
 $agentModelsFile = Join-Path $HOME '.agent-local\agent-models.json'
 if (Test-Path -LiteralPath $agentModelsFile -PathType Leaf) {
     try {
         $doc = Get-Content -LiteralPath $agentModelsFile -Raw -Encoding utf8 | ConvertFrom-Json
+        # agents：ZCode / Codex 用，值形如 custom:<providerId>:<模型名>
         if ($doc.agents) {
             foreach ($p in $doc.agents.PSObject.Properties) { $script:AgentModels[$p.Name] = $p.Value }
+        }
+        # claude：Claude Code 专用，值形如 haiku / sonnet / opus。
+        # 原因见 agent-models.json 的 claude_note：custom: 是 ZCode 的语法，
+        # Claude Code 解析不了，会用会话模型顶替——绑定等于没写。
+        if ($doc.claude) {
+            foreach ($p in $doc.claude.PSObject.Properties) { $script:ClaudeAgentModels[$p.Name] = $p.Value }
+        }
+        else {
+            Warn 'agent-models.json 没有 claude 段——Claude Code 侧将全部退回会话模型。'
         }
     }
     catch {
@@ -279,7 +290,11 @@ function Install-FileLink {
 }
 
 function Install-AgentFiles {
-    param([string] $RepoPath, [string] $Destination)
+    param([string] $RepoPath, [string] $Destination, [hashtable] $Bindings)
+
+    # 每个客户端的绑定各不相同（见 agent-models.json 的 agents / claude 两段），
+    # 所以绑定表由调用方传入，不再读脚本级变量。
+    if ($null -eq $Bindings) { $Bindings = $script:AgentModels }
 
     $agentDir = Join-Path $RepoPath 'agents'
     if (-not (Test-Path -LiteralPath $agentDir)) { return }
@@ -288,16 +303,23 @@ function Install-AgentFiles {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($agent.Name)
         $dest = Join-Path $Destination $agent.Name
 
-        if ($script:AgentModels.ContainsKey($name)) {
+        if ($Bindings.ContainsKey($name)) {
             # 派生文件，每次重新生成；不做"已存在就跳过"的保护。
             if ($DryRun) { Dry "将生成（注入 model）$dest"; continue }
             try {
-                New-AgentWithModel -Source $agent.FullName -Destination $dest -Model $script:AgentModels[$name]
+                New-AgentWithModel -Source $agent.FullName -Destination $dest -Model $Bindings[$name]
                 Ok "生成 $($agent.Name)（已注入 model）"
             }
             catch {
                 Warn "生成失败：$dest : $($_.Exception.Message)"
             }
+            continue
+        }
+
+        # 有默认绑定、但本客户端没有对应绑定时，刻意不落一个"没有 model 行"的硬链接——
+        # 那会让 doctor 报一句含混的"没有注入 model"。这里点名说明缺的是哪一段。
+        if (($Bindings -ne $script:AgentModels) -and $script:AgentModels.ContainsKey($name)) {
+            Warn "$($agent.Name) 在 agents 段有绑定，但本客户端这一段没有对应项——未注入 model。"
             continue
         }
 
@@ -451,9 +473,11 @@ if ($ExtraRepo) {
 }
 
 Write-Head '子 agent'
-Install-AgentFiles -RepoPath $RepoRoot -Destination $CodexAgents
-Install-AgentFiles -RepoPath $RepoRoot -Destination $ZcodeAgents
-Install-AgentFiles -RepoPath $RepoRoot -Destination $ClaudeAgents
+Install-AgentFiles -RepoPath $RepoRoot -Destination $CodexAgents  -Bindings $script:AgentModels
+Install-AgentFiles -RepoPath $RepoRoot -Destination $ZcodeAgents  -Bindings $script:AgentModels
+# Claude Code 走独立的 claude 段：custom:<providerId>:<模型名> 是 ZCode 的语法，
+# Claude Code 解析不了会静默退回会话模型（2026-09-18 实测四个 agent 全部如此）。
+Install-AgentFiles -RepoPath $RepoRoot -Destination $ClaudeAgents -Bindings $script:ClaudeAgentModels
 
 Write-Head '规则'
 Install-FileLink -Source (Join-Path $RepoRoot 'rules\AGENTS.md') -Destination (Join-Path $CodexHome  'AGENTS.md')

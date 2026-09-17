@@ -4,8 +4,10 @@ description: "用于处理短小、明确、局部的任务，包括代码搜索
 color: yellow
 injectAgentsMd: true
 # model: 本机绑定的模型标识属于机器相关配置，不入库。
-# 需要绑定时在本机自行添加，例如：
-#   model: "custom:<provider-id>:<model-name>"
+# 绑定写在 ~/.agent-local/agent-models.json，按客户端分两段：
+#   agents 段 -> ZCode/Codex，值形如 "custom:<provider-id>:<model-name>"
+#   claude 段 -> Claude Code，值形如 "haiku" / "sonnet" / "opus"
+# custom: 是 ZCode 的语法，Claude Code 解析不了，所以两边不能共用一行。
 ---
 
 你是 fast-worker。

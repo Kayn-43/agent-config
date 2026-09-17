@@ -91,6 +91,28 @@ scripts/      install.ps1, update.ps1, doctor.ps1
 的默认安装位置，现有上游技能也都在那里。`install.ps1` 把仓库的技能**直接链接到
 三个根**，因此每个客户端读到的都是同一份物理内容。
 
+### 子 agent 的模型绑定（按客户端分两段）
+
+`agents/*.md` 里**刻意不含 `model:` 字段**——绑定属于机器配置。真源是
+`~/.agent-local/agent-models.json`，按客户端分成两段：
+
+| 段 | 客户端 | 值的形态 | 例 |
+|---|---|---|---|
+| `agents` | ZCode / Codex | `custom:<providerId>:<模型名>` | `custom:builtin%3Abigmodel:GLM-5.3-Flash` |
+| `claude` | Claude Code | Claude 档位名 | `haiku` |
+
+**为什么必须分两段。** `custom:<providerId>:<模型名>` 是 ZCode 的语法（provider 目录在
+`~/.zcode/v2/config.json`，providerId 含冒号时用 `%3A` 编码）。Claude Code 不认这种写法，
+会**静默退回会话模型**：2026-09-18 实测四个 agent 的 `model:` 行全部被忽略，其中
+`verifier` / `researcher` 声明 GLM-5.3-Flash，实际跑在 deepseek 上，而当时的 doctor 全绿。
+症状是「配置看着对、doctor 也过、模型却没换」。
+
+Claude Code 侧绑**档位名**而不是具体模型 id：档位名到真实后端的映射挂在 cc-switch 的
+『当前 provider』上（`claudeDesktopModelRoutes`），换 provider 就会变，但档位名本身不用改。
+
+`install.ps1` 按客户端注入对应的那一段。`doctor.ps1` 除了比对「客户端实际值 == 真源声明」，
+还强制两段覆盖同一批 agent——任一段漏掉一个 agent 即 FAIL，否则漏掉的那个会静默退回会话模型。
+
 ### 禁用某个技能
 
 把它加进 `disabled.json`：

@@ -348,13 +348,42 @@ if (Test-Path -LiteralPath $agentRepoDir) {
     # 期望的绑定值（来自本机真源）。客户端副本里注入的 model 必须与它相符——
     # 否则说明有人手改了客户端文件，或者真源与客户端副本不同步（下次 install 会覆盖）。
     $expectedModels = @{}
+    $expectedClaudeModels = @{}
+    $hasClaudeSection = $false
     $mf = Join-Path $AgentLocal 'agent-models.json'
     if (Test-Path -LiteralPath $mf -PathType Leaf) {
         try {
-            $bd = (Get-Content -LiteralPath $mf -Raw -Encoding utf8 | ConvertFrom-Json).agents
-            foreach ($p in $bd.PSObject.Properties) { $expectedModels[$p.Name] = [string] $p.Value }
+            $bindDoc = Get-Content -LiteralPath $mf -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($bindDoc.agents) {
+                foreach ($p in $bindDoc.agents.PSObject.Properties) { $expectedModels[$p.Name] = [string] $p.Value }
+            }
+            if ($bindDoc.claude) {
+                $hasClaudeSection = $true
+                foreach ($p in $bindDoc.claude.PSObject.Properties) { $expectedClaudeModels[$p.Name] = [string] $p.Value }
+            }
         }
         catch { Add-Fail "FAIL: 无法解析 agent-models.json：$($_.Exception.Message)" }
+    }
+
+    # Claude Code 不认 custom:<providerId>:<模型名>（那是 ZCode 的语法），必须有自己的
+    # 绑定段，否则会静默退回会话模型——症状是 doctor 全绿、但 agent 根本没跑在预期模型上。
+    # 因此强制 claude 段与 agents 段覆盖同一批 agent。
+    if ((Test-Path -LiteralPath $mf -PathType Leaf) -and ($expectedModels.Count -gt 0)) {
+        if (-not $hasClaudeSection) {
+            Add-Fail "FAIL: agent-models.json 缺少 claude 段——Claude Code 上的 agent 会退回会话模型"
+        }
+        else {
+            foreach ($n in $expectedModels.Keys) {
+                if (-not $expectedClaudeModels.ContainsKey($n)) {
+                    Add-Fail "FAIL: $n 在 agents 段有绑定，claude 段缺少对应项"
+                }
+            }
+            foreach ($n in $expectedClaudeModels.Keys) {
+                if (-not $expectedModels.ContainsKey($n)) {
+                    Add-Fail "FAIL: $n 在 claude 段有绑定，agents 段缺少对应项"
+                }
+            }
+        }
     }
 
     # 1) 仓库里的 agent 定义不得含 model: —— 绑定属于本机配置
@@ -366,8 +395,15 @@ if (Test-Path -LiteralPath $agentRepoDir) {
     }
 
     # 2) 客户端的 agent 文件必须与仓库定义一致，允许且仅允许多一行注入的 model:
-    foreach ($h in @($CodexHome, $ZcodeHome, $ClaudeHome)) {
-        $adir = Join-Path $h 'agents'
+    #    期望值按客户端取：Codex/ZCode 用 agents 段（custom:<provider>:<model>），
+    #    Claude Code 用 claude 段（Claude 档位名）。两段不得混用。
+    foreach ($c in @(
+            @{ Name = 'codex'; Home = $CodexHome; Bindings = $expectedModels },
+            @{ Name = 'zcode'; Home = $ZcodeHome; Bindings = $expectedModels },
+            @{ Name = 'claude'; Home = $ClaudeHome; Bindings = $expectedClaudeModels }
+        )) {
+
+        $adir = Join-Path $c.Home 'agents'
         if (-not (Test-Path -LiteralPath $adir)) { continue }
 
         foreach ($f in (Get-ChildItem -LiteralPath $adir -Filter '*.md')) {
@@ -396,8 +432,8 @@ if (Test-Path -LiteralPath $agentRepoDir) {
                 $mm = [regex]::Match($a, '(?m)^model\s*:\s*"?([^"\r\n]+)"?')
                 $actualModel = if ($mm.Success) { $mm.Groups[1].Value.Trim() } else { '' }
 
-                if ($expectedModels.ContainsKey($agName)) {
-                    $want = $expectedModels[$agName]
+                if ($c.Bindings.ContainsKey($agName)) {
+                    $want = $c.Bindings[$agName]
                     if ($actualModel -ne $want) {
                         Add-Fail "FAIL: injected model out of sync -> $($f.FullName)"
                         Write-Host "         客户端实际: $actualModel" -ForegroundColor Red
@@ -454,6 +490,36 @@ if ((Test-Path -LiteralPath $modelsFile -PathType Leaf) -and (Test-Path -Literal
     }
     catch {
         Add-Fail "FAIL: 无法校验模型绑定：$($_.Exception.Message)"
+    }
+}
+
+# 3b) Claude Code 侧：claude 段的值必须是 Claude 自己的档位名，而不是 custom: 形式。
+#     custom:<providerId>:<模型名> 是 ZCode 的语法，Claude Code 解析不了——实测会静默退回
+#     会话模型：doctor 全绿，但 agent 根本没跑在预期模型上（2026-09-18 实测四个 agent 全部如此）。
+#     另：档位名到真实后端的映射挂在 cc-switch 的『当前 provider』上（claudeModelRoutes），
+#     doctor 看不到那一层，所以这里只能校验形态，不能校验"最终跑在哪个后端"。
+$claudeAllowed = @('haiku', 'sonnet', 'opus', 'fable', 'inherit')
+
+if (Test-Path -LiteralPath $modelsFile -PathType Leaf) {
+    try {
+        $claudeBindings = (Get-Content -LiteralPath $modelsFile -Raw -Encoding utf8 | ConvertFrom-Json).claude
+        if ($claudeBindings) {
+            foreach ($p in $claudeBindings.PSObject.Properties) {
+                $spec = [string] $p.Value
+                if ($spec -notmatch '^[A-Za-z0-9._-]+$') {
+                    Add-Fail "FAIL: bad claude model spec for $($p.Name): $spec —— 应为 Claude 档位名，不是 custom: 形式"
+                    continue
+                }
+                if ($claudeAllowed -notcontains $spec) {
+                    Add-Fail "FAIL: unknown claude model spec for $($p.Name): $spec（可用：$($claudeAllowed -join ', ')）"
+                    continue
+                }
+                Write-Host "  [ok]   agent $($p.Name) -> claude 档位 $spec" -ForegroundColor Green
+            }
+        }
+    }
+    catch {
+        Add-Fail "FAIL: 无法校验 claude 绑定：$($_.Exception.Message)"
     }
 }
 
