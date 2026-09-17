@@ -83,9 +83,13 @@ scripts/      install.ps1, update.ps1, doctor.ps1
 
 | 客户端 | 技能 | agents | 规则文件 |
 |---|---|---|---|
-| Codex | `~/.codex/skills` | `~/.codex/agents` | `~/.codex/AGENTS.md` |
+| Codex | `~/.codex/skills` | **不装**（见下） | `~/.codex/AGENTS.md` |
 | ZCode | `~/.zcode/skills` | `~/.zcode/agents` | `~/.zcode/AGENTS.md` |
 | Claude Code | `~/.claude/skills` | `~/.claude/agents` | `~/.claude/CLAUDE.md` |
+
+**Codex 只装 skills，不装 agent。** 它有 GPT 订阅，不需要这套子 agent。`install.ps1`
+不往 `~/.codex/agents` 写东西，并会清掉以前留下的、能证明由本仓库生成的副本
+（判据同 doctor：去掉 `model:` 行后与仓库同名文件逐字节相同）；不认识的残留会保留并告警。
 
 **规范根是 `~/.codex/skills`**，不是 `~/.zcode/skills`。前者是 `skill-installer`
 的默认安装位置，现有上游技能也都在那里。`install.ps1` 把仓库的技能**直接链接到
@@ -94,24 +98,29 @@ scripts/      install.ps1, update.ps1, doctor.ps1
 ### 子 agent 的模型绑定（按客户端分两段）
 
 `agents/*.md` 里**刻意不含 `model:` 字段**——绑定属于机器配置。真源是
-`~/.agent-local/agent-models.json`，按客户端分成两段：
+`~/.agent-local/agent-models.json`，**段名就是它服务哪个客户端**：
 
 | 段 | 客户端 | 值的形态 | 例 |
 |---|---|---|---|
-| `agents` | ZCode / Codex | `custom:<providerId>:<模型名>` | `custom:builtin%3Abigmodel:GLM-5.3-Flash` |
+| `zcode` | ZCode | `custom:<providerId>:<模型名>` | `custom:builtin%3Abigmodel:GLM-5.3-Flash` |
 | `claude` | Claude Code | Claude 档位名 | `haiku` |
 
-**为什么必须分两段。** `custom:<providerId>:<模型名>` 是 ZCode 的语法（provider 目录在
-`~/.zcode/v2/config.json`，providerId 含冒号时用 `%3A` 编码）。Claude Code 不认这种写法，
-会**静默退回会话模型**：2026-09-18 实测四个 agent 的 `model:` 行全部被忽略，其中
-`verifier` / `researcher` 声明 GLM-5.3-Flash，实际跑在 deepseek 上，而当时的 doctor 全绿。
+Codex 不在这张表里——它只装 skills，不装 agent。
+
+**为什么 zcode 和 claude 不能共用一行。** `custom:<providerId>:<模型名>` 是 ZCode 的语法
+（provider 目录在 `~/.zcode/v2/config.json`，providerId 含冒号时用 `%3A` 编码）。Claude Code
+不认这种写法，会**静默退回会话模型**：2026-09-18 实测四个 agent 的 `model:` 行全部被忽略，
+其中 `verifier` / `researcher` 声明 GLM-5.3-Flash，实际跑在 deepseek 上，而当时的 doctor 全绿。
 症状是「配置看着对、doctor 也过、模型却没换」。
 
 Claude Code 侧绑**档位名**而不是具体模型 id：档位名到真实后端的映射挂在 cc-switch 的
 『当前 provider』上（`claudeDesktopModelRoutes`），换 provider 就会变，但档位名本身不用改。
+反过来，这也是**换机器时唯一能原样照搬**的一段——`zcode` 段里 UUID 形式的 providerId 是本机
+生成的，新机器上会不同。搬迁注意事项写在 `agent-models.json` 自己的 `portability_note` 里。
 
 `install.ps1` 按客户端注入对应的那一段。`doctor.ps1` 除了比对「客户端实际值 == 真源声明」，
-还强制两段覆盖同一批 agent——任一段漏掉一个 agent 即 FAIL，否则漏掉的那个会静默退回会话模型。
+还强制两段覆盖同一批 agent——任一段漏掉一个 agent 即 FAIL，否则漏掉的那个会静默退回会话模型；
+另外它会确认 `~/.codex/agents` 里没有被重新塞进仓库生成的 agent 文件。
 
 ### 禁用某个技能
 

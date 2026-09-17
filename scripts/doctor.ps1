@@ -347,40 +347,49 @@ if (Test-Path -LiteralPath $agentRepoDir) {
 
     # 期望的绑定值（来自本机真源）。客户端副本里注入的 model 必须与它相符——
     # 否则说明有人手改了客户端文件，或者真源与客户端副本不同步（下次 install 会覆盖）。
-    $expectedModels = @{}
+    $expectedZcodeModels = @{}
     $expectedClaudeModels = @{}
+    $hasZcodeSection = $false
     $hasClaudeSection = $false
     $mf = Join-Path $AgentLocal 'agent-models.json'
     if (Test-Path -LiteralPath $mf -PathType Leaf) {
         try {
             $bindDoc = Get-Content -LiteralPath $mf -Raw -Encoding utf8 | ConvertFrom-Json
-            if ($bindDoc.agents) {
-                foreach ($p in $bindDoc.agents.PSObject.Properties) { $expectedModels[$p.Name] = [string] $p.Value }
+            if ($bindDoc.zcode) {
+                $hasZcodeSection = $true
+                foreach ($p in $bindDoc.zcode.PSObject.Properties) { $expectedZcodeModels[$p.Name] = [string] $p.Value }
             }
             if ($bindDoc.claude) {
                 $hasClaudeSection = $true
                 foreach ($p in $bindDoc.claude.PSObject.Properties) { $expectedClaudeModels[$p.Name] = [string] $p.Value }
             }
+            if ($bindDoc.agents) {
+                Add-Fail "FAIL: agent-models.json 里还有旧键 agents（已改名 zcode）——它现在不生效"
+            }
         }
         catch { Add-Fail "FAIL: 无法解析 agent-models.json：$($_.Exception.Message)" }
     }
 
-    # Claude Code 不认 custom:<providerId>:<模型名>（那是 ZCode 的语法），必须有自己的
-    # 绑定段，否则会静默退回会话模型——症状是 doctor 全绿、但 agent 根本没跑在预期模型上。
-    # 因此强制 claude 段与 agents 段覆盖同一批 agent。
-    if ((Test-Path -LiteralPath $mf -PathType Leaf) -and ($expectedModels.Count -gt 0)) {
+    # 段名 = 服务哪个客户端。Codex 不在这张表里：它只装 skills，不装 agent。
+    #
+    # 两个段都必须存在且覆盖同一批 agent。缺一个不是"退回默认模型"那么无害：Claude Code
+    # 会静默退回会话模型（2026-09-18 实测），症状是配置看着对、doctor 也过、模型却没换。
+    if (Test-Path -LiteralPath $mf -PathType Leaf) {
+        if (-not $hasZcodeSection) {
+            Add-Fail "FAIL: agent-models.json 缺少 zcode 段——ZCode 上的 agent 会退回该客户端默认模型"
+        }
         if (-not $hasClaudeSection) {
             Add-Fail "FAIL: agent-models.json 缺少 claude 段——Claude Code 上的 agent 会退回会话模型"
         }
-        else {
-            foreach ($n in $expectedModels.Keys) {
+        if ($hasZcodeSection -and $hasClaudeSection) {
+            foreach ($n in $expectedZcodeModels.Keys) {
                 if (-not $expectedClaudeModels.ContainsKey($n)) {
-                    Add-Fail "FAIL: $n 在 agents 段有绑定，claude 段缺少对应项"
+                    Add-Fail "FAIL: $n 在 zcode 段有绑定，claude 段缺少对应项"
                 }
             }
             foreach ($n in $expectedClaudeModels.Keys) {
-                if (-not $expectedModels.ContainsKey($n)) {
-                    Add-Fail "FAIL: $n 在 claude 段有绑定，agents 段缺少对应项"
+                if (-not $expectedZcodeModels.ContainsKey($n)) {
+                    Add-Fail "FAIL: $n 在 claude 段有绑定，zcode 段缺少对应项"
                 }
             }
         }
@@ -395,11 +404,11 @@ if (Test-Path -LiteralPath $agentRepoDir) {
     }
 
     # 2) 客户端的 agent 文件必须与仓库定义一致，允许且仅允许多一行注入的 model:
-    #    期望值按客户端取：Codex/ZCode 用 agents 段（custom:<provider>:<model>），
+    #    期望值按客户端取：ZCode 用 zcode 段（custom:<provider>:<model>），
     #    Claude Code 用 claude 段（Claude 档位名）。两段不得混用。
+    #    Codex 不在其中——它只装 skills，不装 agent（见下面的「Codex 不部署 agent」）。
     foreach ($c in @(
-            @{ Name = 'codex'; Home = $CodexHome; Bindings = $expectedModels },
-            @{ Name = 'zcode'; Home = $ZcodeHome; Bindings = $expectedModels },
+            @{ Name = 'zcode'; Home = $ZcodeHome; Bindings = $expectedZcodeModels },
             @{ Name = 'claude'; Home = $ClaudeHome; Bindings = $expectedClaudeModels }
         )) {
 
@@ -452,14 +461,42 @@ if (Test-Path -LiteralPath $agentRepoDir) {
     }
 }
 
-# 3) 绑定的模型必须在客户端配置里存在且启用 —— 这条能在写入前抓到拼错或失效的模型
+# 3) Codex 不部署 agent —— 它只装 skills（Codex 有 GPT 订阅，不需要这套子 agent）。
+#    这里查那边没留下本仓库生成的 agent 文件：install 的清理只在 install 时跑，
+#    手工放进去的或更早的旧副本不会被它碰到，会一直漂移下去。
+$codexAgentsDir = Join-Path $CodexHome 'agents'
+if (Test-Path -LiteralPath $codexAgentsDir) {
+    $leftovers = @()
+    foreach ($f in (Get-ChildItem -LiteralPath $codexAgentsDir -Filter '*.md')) {
+        $src = Join-Path $agentRepoDir $f.Name
+        if (-not (Test-Path -LiteralPath $src -PathType Leaf)) { continue }
+        if ($f.LinkType) { $leftovers += $f.FullName; continue }
+        # 判据同 install.ps1 的 Test-AgentCopyOfRepo：比 body，不比整文件。整文件比对
+        # 只认当前修订版生成的副本，仓库动一次 frontmatter 注释就全部失配、检查失效。
+        $ta = ([System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8)) -replace "`r`n", "`n"
+        $tb = ([System.IO.File]::ReadAllText($src,      [System.Text.Encoding]::UTF8)) -replace "`r`n", "`n"
+        $ma = [regex]::Match($ta, '(?s)^---\n.*?\n---\n(.*)$')
+        $mb = [regex]::Match($tb, '(?s)^---\n.*?\n---\n(.*)$')
+        if ($ma.Success -and $mb.Success -and ($ma.Groups[1].Value -eq $mb.Groups[1].Value)) { $leftovers += $f.FullName }
+    }
+    if ($leftovers.Count -gt 0) {
+        foreach ($p in $leftovers) {
+            Add-Fail "FAIL: Codex 不部署 agent，但这里还有仓库生成的副本 -> $p（跑 scripts\install.ps1 清理）"
+        }
+    }
+    else {
+        Write-Host "  [ok]   $codexAgentsDir : 未部署 agent（Codex 只装 skills）" -ForegroundColor Green
+    }
+}
+
+# 4) 绑定的模型必须在客户端配置里存在且启用 —— 这条能在写入前抓到拼错或失效的模型
 $modelsFile = Join-Path $AgentLocal 'agent-models.json'
 $clientCfg  = Join-Path $ZcodeHome 'v2\config.json'
 
 if ((Test-Path -LiteralPath $modelsFile -PathType Leaf) -and (Test-Path -LiteralPath $clientCfg -PathType Leaf)) {
     try {
         $providers = (Get-Content -LiteralPath $clientCfg -Raw -Encoding utf8 | ConvertFrom-Json).provider
-        $bindings  = (Get-Content -LiteralPath $modelsFile -Raw -Encoding utf8 | ConvertFrom-Json).agents
+        $bindings  = (Get-Content -LiteralPath $modelsFile -Raw -Encoding utf8 | ConvertFrom-Json).zcode
 
         foreach ($p in $bindings.PSObject.Properties) {
             $spec = [string] $p.Value
@@ -493,7 +530,7 @@ if ((Test-Path -LiteralPath $modelsFile -PathType Leaf) -and (Test-Path -Literal
     }
 }
 
-# 3b) Claude Code 侧：claude 段的值必须是 Claude 自己的档位名，而不是 custom: 形式。
+# 4b) Claude Code 侧：claude 段的值必须是 Claude 自己的档位名，而不是 custom: 形式。
 #     custom:<providerId>:<模型名> 是 ZCode 的语法，Claude Code 解析不了——实测会静默退回
 #     会话模型：doctor 全绿，但 agent 根本没跑在预期模型上（2026-09-18 实测四个 agent 全部如此）。
 #     另：档位名到真实后端的映射挂在 cc-switch 的『当前 provider』上（claudeModelRoutes），
