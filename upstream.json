@@ -18,6 +18,33 @@
       "license": "CC-BY-NC-4.0",
       "license_note": "署名-非商业 4.0。**不是**开源许可：禁止商业用途。使用这个 Codex 原生仓库，不要用 Claude Code 的姊妹仓库 Imbad0202/academic-research-skills（同一许可）。",
       "why_reinstall": "体积大（2371 个文件，约 35 MB）且仍在活跃开发；内嵌进本仓库既会让仓库膨胀，也会冻结一个陈旧快照。"
+    },
+    {
+      "name": "deepxiv-cli",
+      "repo": "DeepXiv/deepxiv_sdk",
+      "ref": "main",
+      "path": "skills/deepxiv-cli",
+      "license": "MIT",
+      "license_note": "MIT —— 允许再分发，需保留署名（Copyright (c) 2024 Vibe Research）。",
+      "why_reinstall": "2026-10-05 是手工拷进 .codex/skills 的，没在此处登记，于是 doctor.ps1 报 unmanaged real skill，而且 .claude / .zcode 都看不到它。三件套同源，一起从 DeepXiv/deepxiv_sdk 的 skills/ 下装。"
+    },
+    {
+      "name": "deepxiv-baseline-table",
+      "repo": "DeepXiv/deepxiv_sdk",
+      "ref": "main",
+      "path": "skills/deepxiv-baseline-table",
+      "license": "MIT",
+      "license_note": "MIT —— 允许再分发，需保留署名（Copyright (c) 2024 Vibe Research）。",
+      "why_reinstall": "同上：deepxiv-cli 的配套技能，手工拷贝未登记，随 deepxiv-cli 一起改由上游安装。"
+    },
+    {
+      "name": "deepxiv-trending-digest",
+      "repo": "DeepXiv/deepxiv_sdk",
+      "ref": "main",
+      "path": "skills/deepxiv-trending-digest",
+      "license": "MIT",
+      "license_note": "MIT —— 允许再分发，需保留署名（Copyright (c) 2024 Vibe Research）。",
+      "why_reinstall": "同上：deepxiv-cli 的配套技能，手工拷贝未登记，随 deepxiv-cli 一起改由上游安装。"
     }
   ]
 }
